@@ -91,7 +91,7 @@ async function runEvmPipeline(
   emit: (event: ForgeEvent) => void,
 ) {
   await setStatus(project.id, "generating");
-  emit({ phase: "generating", message: "Generating Solidity contract with Claude..." });
+  emit({ phase: "generating", message: "Generating Solidity contract..." });
 
   const initialCode = await generateSolidityContract(project.prompt, project.contractName);
   const compileLog: string[] = [];
@@ -435,7 +435,7 @@ async function runSolanaPipeline(
   await setStatus(project.id, "generating");
   emit({
     phase: "generating",
-    message: "Generating Anchor (Rust) program and IDL with Claude...",
+    message: "Generating Anchor (Rust) program and IDL...",
   });
 
   let bestCode: string;
