@@ -16,7 +16,8 @@ import {
   useRecordDeployment,
   getGetProjectQueryKey,
   getListProjectsQueryKey,
-  getGetProjectsSummaryQueryKey
+  getGetProjectsSummaryQueryKey,
+  getGetCurrentUserQueryKey
 } from "@workspace/api-client-react"
 import { useQueryClient } from "@tanstack/react-query"
 
@@ -71,6 +72,8 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     await logoutMutation.mutateAsync()
+    queryClient.setQueryData(getGetCurrentUserQueryKey(), null)
+    queryClient.removeQueries({ queryKey: getGetCurrentUserQueryKey() })
     setLocation("/")
   }
 
@@ -129,7 +132,7 @@ export default function DashboardPage() {
 
     } catch (err: any) {
       setIsForging(false)
-      toast.error(err.response?.data?.error || "Failed to start forge job")
+      toast.error(err?.data?.error || err?.message || "Failed to start forge job")
     }
   }
 

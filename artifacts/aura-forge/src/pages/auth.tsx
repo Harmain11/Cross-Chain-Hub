@@ -45,7 +45,7 @@ export default function AuthPage() {
       }
       setLocation("/dashboard")
     } catch (err: any) {
-      toast.error(err.response?.data?.error || "Authentication failed")
+      toast.error(err?.data?.error || err?.message || "Authentication failed")
     }
   }
 
@@ -96,7 +96,11 @@ export default function AuthPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="bg-background/50 border-white/10 focus:border-primary/50 font-mono"
+                  minLength={8}
                 />
+                {!isLogin && (
+                  <p className="text-xs text-muted-foreground font-mono">Minimum 8 characters</p>
+                )}
               </div>
               <Button 
                 type="submit" 
