@@ -171,6 +171,58 @@ export default function DashboardPage() {
     .filter(p => p.parentProjectId === activeProjectId)
     .sort((a, b) => a.id - b.id)
 
+  // VS Code-style tab reordering: a user-chosen display order for the open tabs
+  // (Original + its Security Pass re-runs), independent of their underlying
+  // chronological order. Reset whenever the selected history project changes
+  // so a fresh set of tabs starts in its natural order.
+  const [tabOrderIds, setTabOrderIds] = useState<number[] | null>(null)
+  const [draggedTabId, setDraggedTabId] = useState<number | null>(null)
+  const [dragOverTabId, setDragOverTabId] = useState<number | null>(null)
+
+  useEffect(() => {
+    setTabOrderIds(null)
+    setDraggedTabId(null)
+    setDragOverTabId(null)
+  }, [activeProjectId])
+
+  const openTabs = activeProjectId
+    ? [
+        { id: activeProjectId, label: "Original", score: null as number | null },
+        ...hardenTabs.map((tab, i) => ({
+          id: tab.id,
+          label: `Security Pass ${i + 1}`,
+          score: tab.securityScore,
+        })),
+      ]
+    : []
+
+  const orderedTabs = (() => {
+    const naturalIds = openTabs.map(t => t.id)
+    if (!tabOrderIds) return openTabs
+    const known = tabOrderIds.filter(id => naturalIds.includes(id))
+    const missing = naturalIds.filter(id => !known.includes(id))
+    const finalOrder = [...known, ...missing]
+    return finalOrder.map(id => openTabs.find(t => t.id === id)!).filter(Boolean)
+  })()
+
+  const handleTabDrop = (targetId: number) => {
+    if (draggedTabId === null || draggedTabId === targetId) {
+      setDraggedTabId(null)
+      setDragOverTabId(null)
+      return
+    }
+    const currentOrder = orderedTabs.map(t => t.id)
+    const from = currentOrder.indexOf(draggedTabId)
+    const to = currentOrder.indexOf(targetId)
+    if (from === -1 || to === -1) return
+    const next = [...currentOrder]
+    next.splice(from, 1)
+    next.splice(to, 0, draggedTabId)
+    setTabOrderIds(next)
+    setDraggedTabId(null)
+    setDragOverTabId(null)
+  }
+
   // Free-text answer to activeProject.securityContextQuestion, submitted alongside
   // the next "Improve Security" run so the hardening pass can use it.
   const [hardenContext, setHardenContext] = useState("")
@@ -683,9 +735,9 @@ export default function DashboardPage() {
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden">
       
       {/* Left Panel: Profile, History, Forge Controls */}
-      <div className="w-[320px] min-w-[320px] flex flex-col border-r border-border bg-card/30 backdrop-blur-md z-10 relative shadow-[10px_0_30px_rgba(0,0,0,0.5)]">
+      <div className="w-[360px] min-w-[360px] flex flex-col border-r border-border bg-card/30 backdrop-blur-md z-10 relative shadow-[10px_0_30px_rgba(0,0,0,0.5)]">
         
-        <div className="p-4 border-b border-border flex items-center justify-between">
+        <div className="p-5 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded bg-primary/20 flex items-center justify-center border border-primary/40 shadow-[0_0_10px_rgba(0,240,255,0.2)]">
               <Icons.Zap className="w-4 h-4 text-primary" />
@@ -818,7 +870,7 @@ export default function DashboardPage() {
         </div>
 
         {activeTeam && (
-          <div className="px-4 py-3 border-b border-border bg-black/20">
+          <div className="px-5 py-4 border-b border-border bg-black/20">
             <div className="flex justify-between items-center text-[10px] font-mono text-muted-foreground uppercase mb-2 tracking-wider">
               <span>Team Members ({teamMembers.length})</span>
             </div>
@@ -851,7 +903,7 @@ export default function DashboardPage() {
         )}
 
         <div className="flex-1 flex flex-col min-h-0">
-          <div className="px-4 py-3 border-b border-border bg-black/20">
+          <div className="px-5 py-4 border-b border-border bg-black/20">
             <div className="flex justify-between items-center text-[10px] font-mono text-muted-foreground uppercase mb-2 tracking-wider">
               <span>Ecosystem Target</span>
             </div>
@@ -873,9 +925,9 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="px-4 py-4 border-b border-border bg-black/20">
-            <div className="space-y-3">
-              <div className="space-y-1">
+          <div className="px-5 py-5 border-b border-border bg-black/20">
+            <div className="space-y-4">
+              <div className="space-y-1.5">
                 <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Starter Template</Label>
                 <Select value={templateId} onValueChange={setTemplateId} disabled={isForging}>
                   <SelectTrigger className="h-8 text-xs font-mono bg-background/50">
@@ -895,28 +947,28 @@ export default function DashboardPage() {
                   <Switch checked={upgradeable} onCheckedChange={setUpgradeable} disabled={isForging} />
                 </div>
               )}
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Contract Name</Label>
                 <Input 
                   placeholder="e.g. Vault" 
-                  className="h-8 text-xs font-mono bg-background/50 focus-visible:ring-primary/50" 
+                  className="h-9 text-xs font-mono bg-background/50 focus-visible:ring-primary/50" 
                   value={contractName}
                   onChange={e => setContractName(e.target.value)}
                   disabled={isForging}
                 />
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Description Prompt</Label>
                 <Textarea 
                   placeholder="Create a standard ERC20 token with a mint function callable only by the owner..." 
-                  className="text-xs font-mono min-h-[80px] bg-background/50 focus-visible:ring-primary/50 resize-none"
+                  className="text-xs font-mono min-h-[96px] bg-background/50 focus-visible:ring-primary/50 resize-none"
                   value={prompt}
                   onChange={e => setPrompt(e.target.value)}
                   disabled={isForging}
                 />
               </div>
               <Button 
-                className="w-full h-10 font-mono text-sm uppercase tracking-widest shadow-[0_0_15px_rgba(0,240,255,0.15)] hover:shadow-[0_0_20px_rgba(0,240,255,0.3)] transition-all"
+                className="w-full h-11 font-mono text-sm uppercase tracking-widest shadow-[0_0_15px_rgba(0,240,255,0.15)] hover:shadow-[0_0_20px_rgba(0,240,255,0.3)] transition-all"
                 onClick={handleStartForge}
                 disabled={isForging || !prompt || !contractName}
               >
@@ -927,14 +979,14 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex-1 flex flex-col min-h-0 bg-black/40">
-            <div className="px-4 py-2 border-b border-border flex justify-between items-center">
+            <div className="px-5 py-3 border-b border-border flex justify-between items-center">
               <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Local History</span>
               {summary && (
                 <span className="text-[10px] text-primary font-mono">{summary.totalProjects} Jobs</span>
               )}
             </div>
             <ScrollArea className="flex-1">
-              <div className="p-2 space-y-1">
+              <div className="p-3 space-y-1.5">
                 {projects.filter(proj => !proj.parentProjectId).map((proj) => (
                   <button
                     key={proj.id}
@@ -945,7 +997,7 @@ export default function DashboardPage() {
                         setLogsByProject(prev => ({ ...prev, [proj.id]: [{ phase: "sys", message: `Loaded project: ${proj.contractName} [${proj.id}]` }] }))
                       }
                     }}
-                    className={`w-full text-left p-2 rounded flex items-center justify-between group transition-colors font-mono text-xs ${activeProjectId === proj.id ? 'bg-primary/20 border border-primary/50 text-primary-foreground' : 'bg-transparent border border-transparent hover:bg-white/5 text-muted-foreground'}`}
+                    className={`w-full text-left p-2.5 rounded-lg flex items-center justify-between group transition-all duration-150 font-mono text-xs ${activeProjectId === proj.id ? 'bg-primary/20 border border-primary/50 text-primary-foreground shadow-[0_0_16px_rgba(0,240,255,0.08)]' : 'bg-transparent border border-transparent hover:bg-white/5 hover:border-white/5 text-muted-foreground'}`}
                   >
                     <div className="flex flex-col truncate">
                       <span className="truncate font-semibold text-foreground group-hover:text-primary transition-colors">{proj.contractName}</span>
@@ -967,22 +1019,42 @@ export default function DashboardPage() {
       <div className="flex-1 flex flex-col min-w-0 bg-black relative">
         {activeProjectId && (
           <div className="h-9 min-h-[2.25rem] border-b border-border bg-card/40 flex items-center px-2 gap-1 overflow-x-auto shrink-0">
-            <button
-              onClick={() => setDisplayedProjectId(activeProjectId)}
-              className={`px-3 h-7 rounded-t font-mono text-[11px] uppercase tracking-wider whitespace-nowrap transition-colors flex items-center gap-1.5 ${displayedProjectId === activeProjectId ? 'bg-black text-primary border-t border-x border-primary/40' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {runningProjectIds.has(activeProjectId) && <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />}
-              Original
-            </button>
-            {hardenTabs.map((tab, i) => (
+            {orderedTabs.map((tab) => (
               <button
                 key={tab.id}
+                draggable
+                onDragStart={(e) => {
+                  setDraggedTabId(tab.id)
+                  e.dataTransfer.effectAllowed = "move"
+                  // Firefox requires data to be set for drag to initiate.
+                  e.dataTransfer.setData("text/plain", String(tab.id))
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  if (draggedTabId !== null && draggedTabId !== tab.id) {
+                    setDragOverTabId(tab.id)
+                  }
+                }}
+                onDragLeave={() => {
+                  setDragOverTabId(prev => (prev === tab.id ? null : prev))
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  handleTabDrop(tab.id)
+                }}
+                onDragEnd={() => {
+                  setDraggedTabId(null)
+                  setDragOverTabId(null)
+                }}
                 onClick={() => setDisplayedProjectId(tab.id)}
-                className={`px-3 h-7 rounded-t font-mono text-[11px] uppercase tracking-wider whitespace-nowrap transition-colors flex items-center gap-1.5 ${displayedProjectId === tab.id ? 'bg-black text-primary border-t border-x border-primary/40' : 'text-muted-foreground hover:text-foreground'}`}
+                className={`relative px-3 h-7 rounded-t font-mono text-[11px] uppercase tracking-wider whitespace-nowrap transition-all flex items-center gap-1.5 cursor-grab active:cursor-grabbing ${displayedProjectId === tab.id ? 'bg-black text-primary border-t border-x border-primary/40' : 'text-muted-foreground hover:text-foreground'} ${draggedTabId === tab.id ? 'opacity-40' : 'opacity-100'}`}
               >
-                {runningProjectIds.has(tab.id) && <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />}
-                Security Pass {i + 1}
-                {tab.securityScore !== null && <span className="opacity-60">({tab.securityScore})</span>}
+                {dragOverTabId === tab.id && draggedTabId !== null && draggedTabId !== tab.id && (
+                  <span className="absolute left-0 top-0.5 bottom-0.5 w-0.5 bg-primary shadow-[0_0_6px_var(--primary)]" />
+                )}
+                {runningProjectIds.has(tab.id) && <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0" />}
+                {tab.label}
+                {tab.score !== null && tab.score !== undefined && <span className="opacity-60">({tab.score})</span>}
               </button>
             ))}
           </div>
@@ -1114,16 +1186,16 @@ export default function DashboardPage() {
         </div>
 
         {/* Console */}
-        <div className="h-64 min-h-[16rem] bg-[#050505] flex flex-col font-mono text-xs">
-          <div className="h-8 border-b border-border flex items-center px-4 justify-between bg-card/50">
+        <div className="h-72 min-h-[18rem] bg-[#050505] flex flex-col font-mono text-xs">
+          <div className="h-9 border-b border-border flex items-center px-5 justify-between bg-card/50">
             <span className="text-[10px] text-muted-foreground uppercase tracking-widest flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${isForging || isDeploying ? 'bg-primary animate-pulse shadow-[0_0_5px_var(--primary)]' : 'bg-muted-foreground'}`} />
               Terminal Output
             </span>
           </div>
-          <ScrollArea className="flex-1 p-4 text-[#888]">
+          <ScrollArea className="flex-1 p-5 text-[#888]">
             {consoleLogs.map((log, i) => (
-              <div key={i} className="mb-1 leading-relaxed flex gap-3">
+              <div key={i} className="mb-1.5 leading-relaxed flex gap-3">
                 <span className="text-primary/50 shrink-0 select-none">[{new Date().toISOString().substring(11, 19)}]</span>
                 <span className={
                   log.phase === 'error' ? 'text-destructive' : 
@@ -1139,10 +1211,10 @@ export default function DashboardPage() {
       </div>
 
       {/* Right Panel: Data & Deploy */}
-      <div className="w-[320px] min-w-[320px] border-l border-border bg-card/30 backdrop-blur-md flex flex-col z-10 relative shadow-[-10px_0_30px_rgba(0,0,0,0.5)]">
+      <div className="w-[360px] min-w-[360px] border-l border-border bg-card/30 backdrop-blur-md flex flex-col z-10 relative shadow-[-10px_0_30px_rgba(0,0,0,0.5)]">
         {activeProject ? (
           <>
-            <div className="p-6 border-b border-border flex flex-col items-center justify-center bg-black/20">
+            <div className="p-7 border-b border-border flex flex-col items-center justify-center bg-black/20">
               <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest w-full mb-6">Security Analysis</span>
               
               <div className="relative w-40 h-40 flex items-center justify-center">
