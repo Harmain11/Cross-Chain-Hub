@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from "react"
 import { useLocation } from "wouter"
 import { toast } from "sonner"
 import Editor from "@monaco-editor/react"
-import { createWalletClient, custom, createPublicClient, http, parseAbi } from "viem"
-import { Connection, PublicKey, Transaction, SystemProgram, Keypair, clusterApiUrl } from "@solana/web3.js"
+import { createWalletClient, custom, createPublicClient, http, BaseError as ViemBaseError } from "viem"
 
 import { 
   useGetCurrentUser, 
@@ -183,6 +182,14 @@ export default function DashboardPage() {
   const [monitoringWebhookInput, setMonitoringWebhookInput] = useState("")
   const [monitoringEmailAlertsInput, setMonitoringEmailAlertsInput] = useState(false)
   const updateMonitoringConfig = useUpdateMonitoringConfig()
+
+  // Manual deployment entry — a fallback for deployments made outside the
+  // app (e.g. via a CLI), and the only path for Solana today since browser
+  // wallets can't push a compiled program without a local Anchor/Cargo build.
+  const [isManualDeployOpen, setIsManualDeployOpen] = useState(false)
+  const [manualTxHash, setManualTxHash] = useState("")
+  const [manualAddress, setManualAddress] = useState("")
+  const [isSavingManualDeploy, setIsSavingManualDeploy] = useState(false)
 
   useEffect(() => {
     setMonitoringWebhookInput(activeProject?.monitoringWebhookUrl ?? "")
@@ -487,144 +494,153 @@ export default function DashboardPage() {
     }
   }
 
+  // Turns a viem/wallet-thrown error into a short, human-readable message —
+  // covering the common cases (no wallet, user rejected, insufficient funds)
+  // instead of surfacing a raw provider error blob.
+  const describeDeployError = (err: unknown): string => {
+    if (err instanceof ViemBaseError) {
+      // shortMessage already collapses viem's verbose causes (e.g. "User
+      // rejected the request.", "insufficient funds for gas * price + value").
+      return err.shortMessage || err.message
+    }
+    const anyErr = err as any
+    if (anyErr?.code === 4001 || anyErr?.code === "ACTION_REJECTED") {
+      return "You rejected the request in your wallet."
+    }
+    if (typeof anyErr?.message === "string" && anyErr.message.length > 0) {
+      return anyErr.message
+    }
+    return "Deployment failed for an unknown reason."
+  }
+
   const handleDeploy = async () => {
     if (!activeProject || !displayedProjectId) return
-    
+    if (activeProject.ecosystem !== "EVM") return // Solana uses the manual-entry path only, see note in the Deploy tab.
+
     setIsDeploying(true)
-    
+
     try {
-      if (activeProject.ecosystem === "EVM") {
-        if (!activeProject.compiledBytecode || !activeProject.abiOrIdl) {
-          throw new Error("Missing bytecode or ABI")
-        }
-        
-        if (!window.ethereum) {
-          throw new Error("No injected Ethereum wallet found (e.g. MetaMask). Please install one.")
-        }
-
-        appendLog(displayedProjectId, { phase: "deploy", message: "Requesting wallet connection..." })
-        
-        const walletClient = createWalletClient({
-          transport: custom(window.ethereum)
-        })
-
-        const [account] = await walletClient.requestAddresses()
-
-        const networkConfig = getEvmNetwork(targetNetwork)
-        if (!networkConfig) {
-          throw new Error(`Unknown network: ${targetNetwork}`)
-        }
-        const chain = networkConfig.chain
-        const rpcUrl = chain.rpcUrls.default.http[0]
-
-        appendLog(displayedProjectId, { phase: "deploy", message: `Switching to ${chain.name}...` })
-        
-        try {
-          await walletClient.switchChain({ id: chain.id })
-        } catch (switchError: any) {
-          // This error code indicates that the chain has not been added to MetaMask.
-          if (switchError.code === 4902) {
-            await walletClient.addChain({ chain })
-          } else {
-            throw switchError
-          }
-        }
-
-        const publicClient = createPublicClient({
-          chain,
-          transport: http(rpcUrl)
-        })
-
-        appendLog(displayedProjectId, { phase: "deploy", message: "Broadcasting deployment transaction..." })
-
-        const abi = JSON.parse(activeProject.abiOrIdl)
-        const hash = await walletClient.deployContract({
-          abi,
-          bytecode: activeProject.compiledBytecode as `0x${string}`,
-          account
-        })
-
-        appendLog(displayedProjectId, { phase: "deploy", message: `Tx Hash: ${hash}. Waiting for confirmation...` })
-
-        const receipt = await publicClient.waitForTransactionReceipt({ hash })
-        
-        if (!receipt.contractAddress) {
-          throw new Error("Deployment failed, no contract address in receipt")
-        }
-
-        appendLog(displayedProjectId, { phase: "deploy", message: `Deployed at ${receipt.contractAddress}` })
-        
-        await recordDeploymentMutation.mutateAsync({
-          id: displayedProjectId,
-          data: {
-            networkSelected: targetNetwork,
-            deploymentTxHash: hash,
-            liveDeployedAddress: receipt.contractAddress
-          }
-        })
-        
-        toast.success("Deployed successfully to EVM")
-
-      } else if (activeProject.ecosystem === "SOLANA") {
-        if (!window.solana || !window.solana.isPhantom) {
-          throw new Error("No Solana wallet found. Please install Phantom or Backpack.")
-        }
-
-        const solanaNetworkConfig = getSolanaNetwork(targetNetwork)
-        if (!solanaNetworkConfig) {
-          throw new Error(`Unknown network: ${targetNetwork}`)
-        }
-        
-        appendLog(displayedProjectId, { phase: "deploy", message: "Requesting Solana wallet connection..." })
-        const resp = await window.solana.connect()
-        const pubKey = resp.publicKey
-
-        appendLog(displayedProjectId, { phase: "deploy", message: `Preparing ${solanaNetworkConfig.label} verification broadcast...` })
-        
-        const connection = new Connection(clusterApiUrl(solanaNetworkConfig.cluster), "confirmed")
-        const transaction = new Transaction().add(
-          SystemProgram.transfer({
-            fromPubkey: pubKey,
-            toPubkey: pubKey,
-            lamports: 0,
-          })
-        )
-        
-        transaction.feePayer = pubKey
-        const { blockhash } = await connection.getLatestBlockhash()
-        transaction.recentBlockhash = blockhash
-
-        appendLog(displayedProjectId, { phase: "deploy", message: "Requesting signature..." })
-        const signed = await window.solana.signTransaction(transaction)
-        const signature = await connection.sendRawTransaction(signed.serialize())
-        
-        appendLog(displayedProjectId, { phase: "deploy", message: `Tx Signature: ${signature}. Verifying...` })
-        await connection.confirmTransaction(signature, "confirmed")
-
-        const mockAddress = Keypair.generate().publicKey.toString()
-        appendLog(displayedProjectId, { phase: "deploy", message: `Simulated program ID: ${mockAddress} (${solanaNetworkConfig.label} Broadcast Anchor Only)` })
-
-        await recordDeploymentMutation.mutateAsync({
-          id: displayedProjectId,
-          data: {
-            networkSelected: solanaNetworkConfig.label,
-            deploymentTxHash: signature,
-            liveDeployedAddress: mockAddress
-          }
-        })
-        
-        toast.success("Verification broadcast recorded")
+      if (!activeProject.compiledBytecode || !activeProject.abiOrIdl) {
+        throw new Error("This project hasn't compiled successfully yet, so there's no bytecode to deploy.")
       }
-      
+
+      if (!window.ethereum) {
+        throw new Error("No injected Ethereum wallet found. Install MetaMask (or another EIP-1193 wallet) and try again.")
+      }
+
+      const networkConfig = getEvmNetwork(targetNetwork)
+      if (!networkConfig) {
+        throw new Error(`Unknown network: ${targetNetwork}`)
+      }
+      const chain = networkConfig.chain
+      const rpcUrl = chain.rpcUrls.default.http[0]
+
+      appendLog(displayedProjectId, { phase: "deploy", message: "Requesting wallet connection..." })
+
+      const walletClient = createWalletClient({
+        chain,
+        transport: custom(window.ethereum),
+      })
+
+      const [account] = await walletClient.requestAddresses()
+      if (!account) {
+        throw new Error("No account was returned by the wallet.")
+      }
+
+      appendLog(displayedProjectId, { phase: "deploy", message: `Connected as ${account}. Switching to ${chain.name}...` })
+
+      try {
+        await walletClient.switchChain({ id: chain.id })
+      } catch (switchError: any) {
+        // 4902 means the chain hasn't been added to the wallet yet.
+        if (switchError?.code === 4902) {
+          await walletClient.addChain({ chain })
+        } else {
+          throw switchError
+        }
+      }
+
+      const publicClient = createPublicClient({
+        chain,
+        transport: http(rpcUrl),
+      })
+
+      appendLog(displayedProjectId, { phase: "deploy", message: "Sign the deployment transaction in your wallet..." })
+
+      const abi = JSON.parse(activeProject.abiOrIdl)
+      const hash = await walletClient.deployContract({
+        abi,
+        bytecode: activeProject.compiledBytecode as `0x${string}`,
+        account,
+        chain,
+      })
+
+      appendLog(displayedProjectId, { phase: "deploy", message: `Broadcast as ${hash}. Waiting for confirmation...` })
+
+      const receipt = await publicClient.waitForTransactionReceipt({ hash })
+
+      if (receipt.status !== "success" || !receipt.contractAddress) {
+        throw new Error("The transaction was mined but reverted, or no contract address was returned.")
+      }
+
+      appendLog(displayedProjectId, { phase: "deploy", message: `Deployed at ${receipt.contractAddress}` })
+
+      await recordDeploymentMutation.mutateAsync({
+        id: displayedProjectId,
+        data: {
+          networkSelected: targetNetwork,
+          deploymentTxHash: hash,
+          liveDeployedAddress: receipt.contractAddress,
+        },
+      })
+
+      toast.success("Deployed successfully.")
+
       queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(displayedProjectId) })
       queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() })
       queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() })
-
-    } catch (err: any) {
-      appendLog(displayedProjectId, { phase: "error", message: `DEPLOYMENT ERROR: ${err.message || "Unknown error"}` })
-      toast.error(err.message || "Deployment failed")
+    } catch (err) {
+      const message = describeDeployError(err)
+      appendLog(displayedProjectId, { phase: "error", message: `DEPLOYMENT ERROR: ${message}` })
+      toast.error(message)
     } finally {
       setIsDeploying(false)
+    }
+  }
+
+  // Records a deployment made outside the app (own CLI/script), or a Solana
+  // deployment made via the Anchor/Solana CLI against the exported project —
+  // Solana programs can't be pushed from a browser wallet, since that needs
+  // a compiled .so binary chunked into a buffer account, which only a local
+  // Cargo/Anchor toolchain can produce.
+  const handleSaveManualDeploy = async () => {
+    if (!activeProject || !displayedProjectId) return
+    if (!manualTxHash.trim() || !manualAddress.trim()) {
+      toast.error("Provide both a transaction hash/signature and the resulting address/program ID.")
+      return
+    }
+
+    setIsSavingManualDeploy(true)
+    try {
+      await recordDeploymentMutation.mutateAsync({
+        id: displayedProjectId,
+        data: {
+          networkSelected: targetNetwork,
+          deploymentTxHash: manualTxHash.trim(),
+          liveDeployedAddress: manualAddress.trim(),
+        },
+      })
+      toast.success("Deployment recorded.")
+      setManualTxHash("")
+      setManualAddress("")
+      setIsManualDeployOpen(false)
+      queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(displayedProjectId) })
+      queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() })
+      queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() })
+    } catch (err: any) {
+      toast.error(err?.data?.error || err?.message || "Could not record this deployment.")
+    } finally {
+      setIsSavingManualDeploy(false)
     }
   }
 
@@ -1259,25 +1275,77 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                {activeProject.ecosystem === "SOLANA" && (
-                  <p className="text-[10px] font-mono text-muted-foreground text-center px-2 py-2 bg-amber-500/10 text-amber-500/80 rounded border border-amber-500/20">
-                    Solana programs are anchored via Devnet broadcast. Full deployment requires local Cargo tools.
+                {activeProject.ecosystem === "SOLANA" ? (
+                  <p className="text-[10px] font-mono text-muted-foreground text-center px-2 py-2 bg-amber-500/10 text-amber-500/80 rounded border border-amber-500/20 leading-relaxed">
+                    Browser wallets can't push a compiled Solana program — that needs a local Anchor/Solana CLI build. Download the project, run <code>anchor deploy</code> yourself, then record the result below.
                   </p>
+                ) : (
+                  <Button
+                    onClick={handleDeployClick}
+                    disabled={isDeploying || activeProject.status !== "success" || isForging}
+                    className="w-full h-12 font-mono uppercase tracking-widest text-sm relative group overflow-hidden border border-primary/50"
+                    variant="outline"
+                  >
+                    <div className="absolute inset-0 bg-primary/10 group-hover:bg-primary/20 transition-colors" />
+                    <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMDUiLz4KPC9zdmc+')] opacity-20 mix-blend-overlay" />
+                    <span className="relative flex items-center text-primary group-hover:text-white transition-colors">
+                      {isDeploying ? <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Icons.Zap className="w-4 h-4 mr-2" />}
+                      Connect Wallet & Deploy
+                    </span>
+                  </Button>
                 )}
 
-                <Button 
-                  onClick={handleDeployClick}
-                  disabled={isDeploying || activeProject.status !== "success" || isForging}
-                  className="w-full h-12 font-mono uppercase tracking-widest text-sm relative group overflow-hidden border border-primary/50"
-                  variant="outline"
-                >
-                  <div className="absolute inset-0 bg-primary/10 group-hover:bg-primary/20 transition-colors" />
-                  <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMDUiLz4KPC9zdmc+')] opacity-20 mix-blend-overlay" />
-                  <span className="relative flex items-center text-primary group-hover:text-white transition-colors">
-                    {isDeploying ? <Icons.Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Icons.Zap className="w-4 h-4 mr-2" />}
-                    Broadcast Deploy
-                  </span>
-                </Button>
+                {!isManualDeployOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsManualDeployOpen(true)}
+                    disabled={isForging}
+                    className="w-full text-[10px] font-mono text-muted-foreground hover:text-foreground uppercase tracking-widest text-center underline-offset-2 hover:underline disabled:opacity-50"
+                  >
+                    {activeProject.ecosystem === "SOLANA" ? "Record a deployment" : "Deployed elsewhere? Enter it manually"}
+                  </button>
+                ) : (
+                  <div className="space-y-2 bg-black/30 border border-white/5 rounded p-3">
+                    <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                      {activeProject.ecosystem === "SOLANA" ? "Program deploy signature & program ID" : "Transaction hash & contract address"}
+                    </Label>
+                    <Input
+                      value={manualTxHash}
+                      onChange={(e) => setManualTxHash(e.target.value)}
+                      placeholder={activeProject.ecosystem === "SOLANA" ? "Deploy transaction signature" : "0x transaction hash"}
+                      disabled={isSavingManualDeploy}
+                      className="h-8 font-mono text-[11px] bg-background/50"
+                    />
+                    <Input
+                      value={manualAddress}
+                      onChange={(e) => setManualAddress(e.target.value)}
+                      placeholder={activeProject.ecosystem === "SOLANA" ? "Program ID" : "0x contract address"}
+                      disabled={isSavingManualDeploy}
+                      className="h-8 font-mono text-[11px] bg-background/50"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 font-mono text-[10px] uppercase tracking-widest flex-1"
+                        onClick={handleSaveManualDeploy}
+                        disabled={isSavingManualDeploy}
+                      >
+                        {isSavingManualDeploy ? <Icons.Loader2 className="w-3 h-3 mr-2 animate-spin" /> : null}
+                        Save
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 font-mono text-[10px] uppercase tracking-widest"
+                        onClick={() => { setIsManualDeployOpen(false); setManualTxHash(""); setManualAddress("") }}
+                        disabled={isSavingManualDeploy}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 {activeProject.liveDeployedAddress && (
                   <div className="mt-4 pt-4 border-t border-border/50">
