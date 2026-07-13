@@ -80,6 +80,51 @@ export async function generateAnchorContract(
   return { code: rustBlock.body, idl: jsonBlock.body };
 }
 
+export async function hardenSolidityContract(
+  code: string,
+  securityNotes: string,
+  score: number,
+  contractName: string,
+): Promise<string> {
+  const system =
+    "You are a senior smart-contract security engineer performing a remediation pass. Given a Solidity contract and an auditor's findings, rewrite the contract to fix EVERY flagged issue (access control, reentrancy, integer issues, unchecked external calls, missing validation, etc.) while preserving the contract's original functionality and public interface as much as possible. " +
+    "Rules: keep the contract named exactly the given name; it MUST NOT require constructor arguments; no external imports; respond with ONLY a single fenced ```solidity code block containing the full corrected file, no prose before or after.";
+  const user = `This Solidity contract named "${contractName}" scored ${score}/100 in a security audit.\n\nCONTRACT:\n${code}\n\nAUDITOR FINDINGS:\n${securityNotes}\n\nRewrite the contract to remediate every finding and maximize its security score, without breaking compilation.`;
+  const text = await ask(system, user);
+  return extractCodeBlock(text);
+}
+
+export async function hardenAnchorContract(
+  code: string,
+  idl: string,
+  securityNotes: string,
+  score: number,
+  contractName: string,
+): Promise<{ code: string; idl: string }> {
+  const system =
+    "You are a senior Solana/Anchor security engineer performing a remediation pass. Given an Anchor (Rust) program, its IDL, and an auditor's findings, rewrite BOTH the program and its IDL to fix EVERY flagged issue (PDA seed misuse, missing signer/owner checks, missing account validation, arithmetic overflow, etc.) while preserving the program's original functionality. " +
+    "Rules: the program module name should reflect the given contract name; respond with the corrected Rust source in a single fenced ```rust code block, followed by the corrected IDL JSON in a single fenced ```json code block. No other prose.";
+  const user = `This Anchor program named "${contractName}" scored ${score}/100 in a security audit.\n\nPROGRAM:\n${code}\n\nIDL:\n${idl}\n\nAUDITOR FINDINGS:\n${securityNotes}\n\nRewrite the program and IDL to remediate every finding and maximize its security score.`;
+  const text = await ask(system, user);
+
+  const blocks = [
+    ...text.matchAll(/```(\w+)?\n([\s\S]*?)```/g),
+  ].map((m) => ({ lang: m[1] ?? "", body: (m[2] ?? "").trim() }));
+
+  const rustBlock = blocks.find((b) => b.lang === "rust") ?? blocks[0];
+  const jsonBlock =
+    blocks.find((b) => b.lang === "json") ??
+    blocks.find((b) => b !== rustBlock);
+
+  if (!rustBlock || !jsonBlock) {
+    throw new Error("LLM did not return both a Rust code block and a JSON IDL block");
+  }
+
+  JSON.parse(jsonBlock.body);
+
+  return { code: rustBlock.body, idl: jsonBlock.body };
+}
+
 export async function scoreContractSecurity(
   code: string,
   ecosystem: "EVM" | "SOLANA",

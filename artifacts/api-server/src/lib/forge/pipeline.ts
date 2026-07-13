@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
 import { db, contractProjectsTable, type ContractProjectRow } from "@workspace/db";
-import { compileSolidity } from "./evmCompile";
+import { compileSolidity, type EvmCompileResult } from "./evmCompile";
 import {
   generateSolidityContract,
   repairSolidityContract,
   generateAnchorContract,
   scoreContractSecurity,
+  hardenSolidityContract,
+  hardenAnchorContract,
 } from "./llm";
 
 export type ForgeEvent =
@@ -14,6 +16,49 @@ export type ForgeEvent =
   | { phase: "error"; message: string };
 
 const MAX_HEAL_ATTEMPTS = 3;
+const MAX_SECURITY_HARDENING_ATTEMPTS = 5;
+const TARGET_SECURITY_SCORE = 95;
+
+/** Compiles `code`, self-healing compiler errors up to MAX_HEAL_ATTEMPTS times. */
+async function compileWithSelfHeal(
+  initialCode: string,
+  contractName: string,
+  emit: (event: ForgeEvent) => void,
+  projectId: number,
+): Promise<{ code: string; result: EvmCompileResult; log: string[] }> {
+  const log: string[] = [];
+  let code = initialCode;
+
+  await setStatus(projectId, "compiling");
+  emit({ phase: "compiling", message: "Compiling with solc..." });
+
+  let result = compileSolidity(contractName, code);
+  let attempt = 0;
+
+  while (!result.success && attempt < MAX_HEAL_ATTEMPTS) {
+    attempt += 1;
+    log.push(`Attempt ${attempt} failed:\n${result.errors}`);
+    await setStatus(projectId, "healing");
+    emit({
+      phase: "healing",
+      message: `Compile failed, self-healing (attempt ${attempt}/${MAX_HEAL_ATTEMPTS})...`,
+    });
+
+    code = await repairSolidityContract(code, result.errors ?? "", contractName);
+
+    await setStatus(projectId, "compiling");
+    emit({ phase: "compiling", message: "Recompiling patched contract with solc..." });
+    result = compileSolidity(contractName, code);
+  }
+
+  if (result.success) {
+    log.push("Compilation succeeded.");
+  } else {
+    log.push(`Final attempt failed:\n${result.errors}`);
+  }
+
+  return { code, result, log };
+}
 
 async function setStatus(id: number, status: string) {
   await db
@@ -48,38 +93,18 @@ async function runEvmPipeline(
   await setStatus(project.id, "generating");
   emit({ phase: "generating", message: "Generating Solidity contract with Claude..." });
 
-  let code = await generateSolidityContract(project.prompt, project.contractName);
+  const initialCode = await generateSolidityContract(project.prompt, project.contractName);
   const compileLog: string[] = [];
 
-  await setStatus(project.id, "compiling");
-  emit({ phase: "compiling", message: "Compiling with solc..." });
+  const first = await compileWithSelfHeal(initialCode, project.contractName, emit, project.id);
+  compileLog.push(...first.log);
 
-  let result = compileSolidity(project.contractName, code);
-  let attempt = 0;
-
-  while (!result.success && attempt < MAX_HEAL_ATTEMPTS) {
-    attempt += 1;
-    compileLog.push(`Attempt ${attempt} failed:\n${result.errors}`);
-    await setStatus(project.id, "healing");
-    emit({
-      phase: "healing",
-      message: `Compile failed, self-healing (attempt ${attempt}/${MAX_HEAL_ATTEMPTS})...`,
-    });
-
-    code = await repairSolidityContract(code, result.errors ?? "", project.contractName);
-
-    await setStatus(project.id, "compiling");
-    emit({ phase: "compiling", message: "Recompiling patched contract with solc..." });
-    result = compileSolidity(project.contractName, code);
-  }
-
-  if (!result.success) {
-    compileLog.push(`Final attempt failed:\n${result.errors}`);
+  if (!first.result.success) {
     await db
       .update(contractProjectsTable)
       .set({
         status: "failed",
-        smartContractCode: code,
+        smartContractCode: first.code,
         compileLog: compileLog.join("\n\n"),
       })
       .where(eq(contractProjectsTable.id, project.id));
@@ -87,21 +112,92 @@ async function runEvmPipeline(
     return;
   }
 
-  compileLog.push("Compilation succeeded.");
   emit({ phase: "compiling", message: "Compilation succeeded." });
 
+  // Best-known-good candidate so far (always compiles successfully).
+  let bestCode = first.code;
+  let bestResult = first.result;
+
   emit({ phase: "auditing", message: "Running LLM security audit..." });
-  const { score, notes } = await scoreContractSecurity(code, "EVM");
+  let { score: bestScore, notes: bestNotes } = await scoreContractSecurity(bestCode, "EVM");
+  emit({
+    phase: "auditing",
+    message: `Security score: ${bestScore}/100. ${bestNotes}`,
+  });
+
+  let hardenAttempt = 0;
+  while (bestScore < TARGET_SECURITY_SCORE && hardenAttempt < MAX_SECURITY_HARDENING_ATTEMPTS) {
+    hardenAttempt += 1;
+    await setStatus(project.id, "hardening");
+    emit({
+      phase: "hardening",
+      message: `Security score ${bestScore}/100 is below the ${TARGET_SECURITY_SCORE} target — hardening contract (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS})...`,
+    });
+
+    const hardenedCode = await hardenSolidityContract(
+      bestCode,
+      bestNotes,
+      bestScore,
+      project.contractName,
+    );
+
+    const recompiled = await compileWithSelfHeal(
+      hardenedCode,
+      project.contractName,
+      emit,
+      project.id,
+    );
+    compileLog.push(...recompiled.log);
+
+    if (!recompiled.result.success) {
+      emit({
+        phase: "hardening",
+        message: "Hardened contract failed to compile even after self-healing; keeping previous best version.",
+      });
+      continue;
+    }
+
+    emit({ phase: "auditing", message: "Re-auditing hardened contract..." });
+    const rescored = await scoreContractSecurity(recompiled.code, "EVM");
+    emit({
+      phase: "auditing",
+      message: `Security score: ${rescored.score}/100. ${rescored.notes}`,
+    });
+
+    if (rescored.score >= bestScore) {
+      bestCode = recompiled.code;
+      bestResult = recompiled.result;
+      bestScore = rescored.score;
+      bestNotes = rescored.notes;
+    } else {
+      emit({
+        phase: "hardening",
+        message: `Hardening attempt regressed the score (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
+      });
+    }
+  }
+
+  if (bestScore >= TARGET_SECURITY_SCORE) {
+    emit({
+      phase: "auditing",
+      message: `Reached target security score: ${bestScore}/100.`,
+    });
+  } else {
+    emit({
+      phase: "auditing",
+      message: `Stopped after ${MAX_SECURITY_HARDENING_ATTEMPTS} hardening attempts. Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
+    });
+  }
 
   const [updated] = await db
     .update(contractProjectsTable)
     .set({
       status: "success",
-      smartContractCode: code,
-      compiledBytecode: result.bytecode,
-      abiOrIdl: JSON.stringify(result.abi),
-      securityScore: score,
-      securityNotes: notes,
+      smartContractCode: bestCode,
+      compiledBytecode: bestResult.bytecode,
+      abiOrIdl: JSON.stringify(bestResult.abi),
+      securityScore: bestScore,
+      securityNotes: bestNotes,
       compileLog: compileLog.join("\n\n"),
     })
     .where(eq(contractProjectsTable.id, project.id))
@@ -120,10 +216,13 @@ async function runSolanaPipeline(
     message: "Generating Anchor (Rust) program and IDL with Claude...",
   });
 
-  const { code, idl } = await generateAnchorContract(
-    project.prompt,
-    project.contractName,
-  );
+  let bestCode: string;
+  let bestIdl: string;
+  {
+    const generated = await generateAnchorContract(project.prompt, project.contractName);
+    bestCode = generated.code;
+    bestIdl = generated.idl;
+  }
 
   await setStatus(project.id, "compiling");
   emit({
@@ -137,17 +236,79 @@ async function runSolanaPipeline(
   const compileLog = "Simulated build: Anchor/cargo toolchain unavailable in this environment. Rust source and IDL were generated but not compiled to a .so binary.";
 
   emit({ phase: "auditing", message: "Running LLM security audit..." });
-  const { score, notes } = await scoreContractSecurity(code, "SOLANA");
+  let { score: bestScore, notes: bestNotes } = await scoreContractSecurity(bestCode, "SOLANA");
+  emit({
+    phase: "auditing",
+    message: `Security score: ${bestScore}/100. ${bestNotes}`,
+  });
+
+  let hardenAttempt = 0;
+  while (bestScore < TARGET_SECURITY_SCORE && hardenAttempt < MAX_SECURITY_HARDENING_ATTEMPTS) {
+    hardenAttempt += 1;
+    await setStatus(project.id, "hardening");
+    emit({
+      phase: "hardening",
+      message: `Security score ${bestScore}/100 is below the ${TARGET_SECURITY_SCORE} target — hardening program (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS})...`,
+    });
+
+    let hardened: { code: string; idl: string };
+    try {
+      hardened = await hardenAnchorContract(
+        bestCode,
+        bestIdl,
+        bestNotes,
+        bestScore,
+        project.contractName,
+      );
+    } catch (err) {
+      emit({
+        phase: "hardening",
+        message: `Hardening pass failed to produce valid output (${err instanceof Error ? err.message : "unknown error"}); keeping previous best version.`,
+      });
+      continue;
+    }
+
+    emit({ phase: "auditing", message: "Re-auditing hardened program..." });
+    const rescored = await scoreContractSecurity(hardened.code, "SOLANA");
+    emit({
+      phase: "auditing",
+      message: `Security score: ${rescored.score}/100. ${rescored.notes}`,
+    });
+
+    if (rescored.score >= bestScore) {
+      bestCode = hardened.code;
+      bestIdl = hardened.idl;
+      bestScore = rescored.score;
+      bestNotes = rescored.notes;
+    } else {
+      emit({
+        phase: "hardening",
+        message: `Hardening attempt regressed the score (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
+      });
+    }
+  }
+
+  if (bestScore >= TARGET_SECURITY_SCORE) {
+    emit({
+      phase: "auditing",
+      message: `Reached target security score: ${bestScore}/100.`,
+    });
+  } else {
+    emit({
+      phase: "auditing",
+      message: `Stopped after ${MAX_SECURITY_HARDENING_ATTEMPTS} hardening attempts. Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
+    });
+  }
 
   const [updated] = await db
     .update(contractProjectsTable)
     .set({
       status: "success",
-      smartContractCode: code,
+      smartContractCode: bestCode,
       compiledBytecode: null,
-      abiOrIdl: idl,
-      securityScore: score,
-      securityNotes: notes,
+      abiOrIdl: bestIdl,
+      securityScore: bestScore,
+      securityNotes: bestNotes,
       compileLog,
     })
     .where(eq(contractProjectsTable.id, project.id))

@@ -14,6 +14,7 @@ export const ForgeStatus = {
   generating: 'generating',
   compiling: 'compiling',
   healing: 'healing',
+  hardening: 'hardening',
   success: 'success',
   failed: 'failed',
 } as const;
