@@ -24,6 +24,13 @@ export const contractProjectsTable = pgTable("contract_projects", {
   abiOrIdl: text("abi_or_idl"), // JSON-serialized string
   securityScore: integer("security_score"),
   securityNotes: text("security_notes"),
+  // Set when the auditor determines a specific piece of business/context info
+  // (e.g. intended access-control model) would let it improve the score further.
+  // Cleared once a hardening run addresses it or reaches the target score.
+  securityContextQuestion: text("security_context_question"),
+  // Free-text answer the user supplied to securityContextQuestion, used to
+  // seed the next hardening pass with that extra context.
+  userContext: text("user_context"),
   compileLog: text("compile_log"),
   networkSelected: text("network_selected"),
   deploymentTxHash: text("deployment_tx_hash"),

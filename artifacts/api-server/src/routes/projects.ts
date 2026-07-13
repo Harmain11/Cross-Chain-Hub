@@ -8,6 +8,7 @@ import {
   RecordDeploymentBody,
   RecordDeploymentResponse,
   CreateHardenJobResponse,
+  CreateHardenJobBody,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { runHardenOnlyPipeline } from "../lib/forge/pipeline";
@@ -166,6 +167,9 @@ router.post("/projects/:id/harden", async (req, res) => {
     return;
   }
 
+  const parsedBody = CreateHardenJobBody.safeParse(req.body ?? {});
+  const context = parsedBody.success ? parsedBody.data.context : undefined;
+
   const [child] = await db
     .insert(contractProjectsTable)
     .values({
@@ -175,6 +179,7 @@ router.post("/projects/:id/harden", async (req, res) => {
       ecosystem: parent.ecosystem,
       parentProjectId: parent.id,
       status: "pending",
+      userContext: context && context.trim().length > 0 ? context.trim() : null,
     })
     .returning();
 

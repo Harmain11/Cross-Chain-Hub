@@ -119,7 +119,8 @@ async function runEvmPipeline(
   let bestResult = first.result;
 
   emit({ phase: "auditing", message: "Running LLM security audit..." });
-  let { score: bestScore, notes: bestNotes } = await scoreContractSecurity(bestCode, "EVM");
+  let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion } =
+    await scoreContractSecurity(bestCode, "EVM");
   emit({
     phase: "auditing",
     message: `Security score: ${bestScore}/100. ${bestNotes}`,
@@ -139,6 +140,7 @@ async function runEvmPipeline(
       bestNotes,
       bestScore,
       project.contractName,
+      project.userContext ?? undefined,
     );
 
     const recompiled = await compileWithSelfHeal(
@@ -169,6 +171,7 @@ async function runEvmPipeline(
       bestResult = recompiled.result;
       bestScore = rescored.score;
       bestNotes = rescored.notes;
+      bestContextQuestion = rescored.contextQuestion;
     } else {
       emit({
         phase: "hardening",
@@ -178,6 +181,7 @@ async function runEvmPipeline(
   }
 
   if (bestScore >= TARGET_SECURITY_SCORE) {
+    bestContextQuestion = null;
     emit({
       phase: "auditing",
       message: `Reached target security score: ${bestScore}/100.`,
@@ -187,6 +191,12 @@ async function runEvmPipeline(
       phase: "auditing",
       message: `Stopped after ${MAX_SECURITY_HARDENING_ATTEMPTS} hardening attempts. Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
     });
+    if (bestContextQuestion) {
+      emit({
+        phase: "auditing",
+        message: `Providing more detail would improve this recommendation: ${bestContextQuestion}`,
+      });
+    }
   }
 
   const [updated] = await db
@@ -198,6 +208,7 @@ async function runEvmPipeline(
       abiOrIdl: JSON.stringify(bestResult.abi),
       securityScore: bestScore,
       securityNotes: bestNotes,
+      securityContextQuestion: bestContextQuestion,
       compileLog: compileLog.join("\n\n"),
     })
     .where(eq(contractProjectsTable.id, project.id))
@@ -267,12 +278,14 @@ async function hardenEvmOnly(
   let bestResult = seed.result;
   let bestScore = parent.securityScore ?? 0;
   let bestNotes = parent.securityNotes ?? "";
+  let bestContextQuestion: string | null = null;
 
   if (parent.securityScore === null) {
     emit({ phase: "auditing", message: "Running LLM security audit..." });
     const scored = await scoreContractSecurity(bestCode, "EVM");
     bestScore = scored.score;
     bestNotes = scored.notes;
+    bestContextQuestion = scored.contextQuestion;
   }
 
   let hardenAttempt = 0;
@@ -287,7 +300,13 @@ async function hardenEvmOnly(
       message: `Hardening contract (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS}), current score ${bestScore}/100...`,
     });
 
-    const hardenedCode = await hardenSolidityContract(bestCode, bestNotes, bestScore, parent.contractName);
+    const hardenedCode = await hardenSolidityContract(
+      bestCode,
+      bestNotes,
+      bestScore,
+      parent.contractName,
+      child.userContext ?? undefined,
+    );
     const recompiled = await compileWithSelfHeal(hardenedCode, parent.contractName, emit, child.id);
     compileLog.push(...recompiled.log);
 
@@ -308,12 +327,17 @@ async function hardenEvmOnly(
       bestResult = recompiled.result;
       bestScore = rescored.score;
       bestNotes = rescored.notes;
+      bestContextQuestion = rescored.contextQuestion;
     } else {
       emit({
         phase: "hardening",
         message: `Hardening attempt regressed the score (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
       });
     }
+  }
+
+  if (bestScore >= TARGET_SECURITY_SCORE) {
+    bestContextQuestion = null;
   }
 
   emit({
@@ -324,6 +348,13 @@ async function hardenEvmOnly(
         : `Stopped after ${hardenAttempt} hardening attempt(s). Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
   });
 
+  if (bestScore < TARGET_SECURITY_SCORE && bestContextQuestion) {
+    emit({
+      phase: "auditing",
+      message: `Providing more detail would improve this recommendation: ${bestContextQuestion}`,
+    });
+  }
+
   const [updated] = await db
     .update(contractProjectsTable)
     .set({
@@ -333,6 +364,7 @@ async function hardenEvmOnly(
       abiOrIdl: JSON.stringify(bestResult.abi),
       securityScore: bestScore,
       securityNotes: bestNotes,
+      securityContextQuestion: bestContextQuestion,
       compileLog: compileLog.join("\n\n"),
     })
     .where(eq(contractProjectsTable.id, child.id))
@@ -355,12 +387,14 @@ async function hardenSolanaOnly(
   let bestIdl = parent.abiOrIdl ?? "";
   let bestScore = parent.securityScore ?? 0;
   let bestNotes = parent.securityNotes ?? "";
+  let bestContextQuestion: string | null = null;
 
   if (parent.securityScore === null) {
     emit({ phase: "auditing", message: "Running LLM security audit..." });
     const scored = await scoreContractSecurity(bestCode, "SOLANA");
     bestScore = scored.score;
     bestNotes = scored.notes;
+    bestContextQuestion = scored.contextQuestion;
   }
 
   let hardenAttempt = 0;
@@ -377,7 +411,14 @@ async function hardenSolanaOnly(
 
     let hardened: { code: string; idl: string };
     try {
-      hardened = await hardenAnchorContract(bestCode, bestIdl, bestNotes, bestScore, parent.contractName);
+      hardened = await hardenAnchorContract(
+        bestCode,
+        bestIdl,
+        bestNotes,
+        bestScore,
+        parent.contractName,
+        child.userContext ?? undefined,
+      );
     } catch (err) {
       emit({
         phase: "hardening",
@@ -395,12 +436,17 @@ async function hardenSolanaOnly(
       bestIdl = hardened.idl;
       bestScore = rescored.score;
       bestNotes = rescored.notes;
+      bestContextQuestion = rescored.contextQuestion;
     } else {
       emit({
         phase: "hardening",
         message: `Hardening attempt regressed the score (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
       });
     }
+  }
+
+  if (bestScore >= TARGET_SECURITY_SCORE) {
+    bestContextQuestion = null;
   }
 
   emit({
@@ -411,6 +457,13 @@ async function hardenSolanaOnly(
         : `Stopped after ${hardenAttempt} hardening attempt(s). Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
   });
 
+  if (bestScore < TARGET_SECURITY_SCORE && bestContextQuestion) {
+    emit({
+      phase: "auditing",
+      message: `Providing more detail would improve this recommendation: ${bestContextQuestion}`,
+    });
+  }
+
   const [updated] = await db
     .update(contractProjectsTable)
     .set({
@@ -420,6 +473,7 @@ async function hardenSolanaOnly(
       abiOrIdl: bestIdl,
       securityScore: bestScore,
       securityNotes: bestNotes,
+      securityContextQuestion: bestContextQuestion,
       compileLog: "Simulated build: Anchor/cargo toolchain unavailable in this environment.",
     })
     .where(eq(contractProjectsTable.id, child.id))
@@ -458,7 +512,8 @@ async function runSolanaPipeline(
   const compileLog = "Simulated build: Anchor/cargo toolchain unavailable in this environment. Rust source and IDL were generated but not compiled to a .so binary.";
 
   emit({ phase: "auditing", message: "Running LLM security audit..." });
-  let { score: bestScore, notes: bestNotes } = await scoreContractSecurity(bestCode, "SOLANA");
+  let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion } =
+    await scoreContractSecurity(bestCode, "SOLANA");
   emit({
     phase: "auditing",
     message: `Security score: ${bestScore}/100. ${bestNotes}`,
@@ -481,6 +536,7 @@ async function runSolanaPipeline(
         bestNotes,
         bestScore,
         project.contractName,
+        project.userContext ?? undefined,
       );
     } catch (err) {
       emit({
@@ -502,6 +558,7 @@ async function runSolanaPipeline(
       bestIdl = hardened.idl;
       bestScore = rescored.score;
       bestNotes = rescored.notes;
+      bestContextQuestion = rescored.contextQuestion;
     } else {
       emit({
         phase: "hardening",
@@ -511,6 +568,7 @@ async function runSolanaPipeline(
   }
 
   if (bestScore >= TARGET_SECURITY_SCORE) {
+    bestContextQuestion = null;
     emit({
       phase: "auditing",
       message: `Reached target security score: ${bestScore}/100.`,
@@ -520,6 +578,12 @@ async function runSolanaPipeline(
       phase: "auditing",
       message: `Stopped after ${MAX_SECURITY_HARDENING_ATTEMPTS} hardening attempts. Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
     });
+    if (bestContextQuestion) {
+      emit({
+        phase: "auditing",
+        message: `Providing more detail would improve this recommendation: ${bestContextQuestion}`,
+      });
+    }
   }
 
   const [updated] = await db
@@ -531,6 +595,7 @@ async function runSolanaPipeline(
       abiOrIdl: bestIdl,
       securityScore: bestScore,
       securityNotes: bestNotes,
+      securityContextQuestion: bestContextQuestion,
       compileLog,
     })
     .where(eq(contractProjectsTable.id, project.id))

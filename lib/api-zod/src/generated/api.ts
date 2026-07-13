@@ -121,6 +121,8 @@ export const GetProjectResponse = zod.object({
   "abiOrIdl": zod.string().nullable().describe('JSON-serialized ABI (EVM) or IDL (Solana)'),
   "securityScore": zod.number().nullable(),
   "securityNotes": zod.string().nullable(),
+  "securityContextQuestion": zod.string().nullable().describe('Set when the auditor determined a specific piece of business\/context info would let it improve the score further; cleared once addressed or the target score is reached.'),
+  "userContext": zod.string().nullable().describe('Additional context the user supplied for this project\'s hardening pass.'),
   "compileLog": zod.string().nullable(),
   "networkSelected": zod.string().nullable(),
   "deploymentTxHash": zod.string().nullable(),
@@ -165,6 +167,8 @@ export const RecordDeploymentResponse = zod.object({
   "abiOrIdl": zod.string().nullable().describe('JSON-serialized ABI (EVM) or IDL (Solana)'),
   "securityScore": zod.number().nullable(),
   "securityNotes": zod.string().nullable(),
+  "securityContextQuestion": zod.string().nullable().describe('Set when the auditor determined a specific piece of business\/context info would let it improve the score further; cleared once addressed or the target score is reached.'),
+  "userContext": zod.string().nullable().describe('Additional context the user supplied for this project\'s hardening pass.'),
   "compileLog": zod.string().nullable(),
   "networkSelected": zod.string().nullable(),
   "deploymentTxHash": zod.string().nullable(),
@@ -200,6 +204,8 @@ export const CreateForgeJobResponse = zod.object({
   "abiOrIdl": zod.string().nullable().describe('JSON-serialized ABI (EVM) or IDL (Solana)'),
   "securityScore": zod.number().nullable(),
   "securityNotes": zod.string().nullable(),
+  "securityContextQuestion": zod.string().nullable().describe('Set when the auditor determined a specific piece of business\/context info would let it improve the score further; cleared once addressed or the target score is reached.'),
+  "userContext": zod.string().nullable().describe('Additional context the user supplied for this project\'s hardening pass.'),
   "compileLog": zod.string().nullable(),
   "networkSelected": zod.string().nullable(),
   "deploymentTxHash": zod.string().nullable(),
@@ -215,6 +221,10 @@ export const CreateHardenJobParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const CreateHardenJobBody = zod.object({
+  "context": zod.string().optional().describe('Optional additional business\/context info from the user, used to seed the hardening prompt when the auditor flagged that more context would improve its recommendation.')
+})
+
 export const CreateHardenJobResponse = zod.object({
   "id": zod.number(),
   "userId": zod.number(),
@@ -228,6 +238,8 @@ export const CreateHardenJobResponse = zod.object({
   "abiOrIdl": zod.string().nullable().describe('JSON-serialized ABI (EVM) or IDL (Solana)'),
   "securityScore": zod.number().nullable(),
   "securityNotes": zod.string().nullable(),
+  "securityContextQuestion": zod.string().nullable().describe('Set when the auditor determined a specific piece of business\/context info would let it improve the score further; cleared once addressed or the target score is reached.'),
+  "userContext": zod.string().nullable().describe('Additional context the user supplied for this project\'s hardening pass.'),
   "compileLog": zod.string().nullable(),
   "networkSelected": zod.string().nullable(),
   "deploymentTxHash": zod.string().nullable(),

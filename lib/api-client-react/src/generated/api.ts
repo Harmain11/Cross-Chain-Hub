@@ -26,6 +26,7 @@ import type {
   DeploymentInput,
   ErrorResponse,
   ForgeContractInput,
+  HardenJobInput,
   HealthStatus,
   ProjectsSummary,
   User
@@ -882,14 +883,15 @@ export const getCreateHardenJobUrl = (id: number,) => {
 /**
  * @summary Start a new on-demand security-hardening re-run of an existing successful project (creates a new linked child project row)
  */
-export const createHardenJob = async (id: number, options?: RequestInit): Promise<ContractProject> => {
+export const createHardenJob = async (id: number,
+    hardenJobInput?: HardenJobInput, options?: RequestInit): Promise<ContractProject> => {
 
   return customFetch<ContractProject>(getCreateHardenJobUrl(id),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(hardenJobInput)
   }
 );}
 
@@ -898,8 +900,8 @@ export const createHardenJob = async (id: number, options?: RequestInit): Promis
 
 
 export const getCreateHardenJobMutationOptions = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHardenJob>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof createHardenJob>>, TError,{id: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHardenJob>>, TError,{id: number;data?: BodyType<HardenJobInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createHardenJob>>, TError,{id: number;data?: BodyType<HardenJobInput>}, TContext> => {
 
 const mutationKey = ['createHardenJob'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -911,10 +913,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createHardenJob>>, {id: number}> = (props) => {
-          const {id} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createHardenJob>>, {id: number;data?: BodyType<HardenJobInput>}> = (props) => {
+          const {id,data} = props ?? {};
 
-          return  createHardenJob(id,requestOptions)
+          return  createHardenJob(id,data,requestOptions)
         }
 
 
@@ -925,18 +927,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type CreateHardenJobMutationResult = NonNullable<Awaited<ReturnType<typeof createHardenJob>>>
-
+    export type CreateHardenJobMutationBody = BodyType<HardenJobInput> | undefined
     export type CreateHardenJobMutationError = ErrorType<ErrorResponse>
 
     /**
  * @summary Start a new on-demand security-hardening re-run of an existing successful project (creates a new linked child project row)
  */
 export const useCreateHardenJob = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHardenJob>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHardenJob>>, TError,{id: number;data?: BodyType<HardenJobInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof createHardenJob>>,
         TError,
-        {id: number},
+        {id: number;data?: BodyType<HardenJobInput>},
         TContext
       > => {
       return useMutation(getCreateHardenJobMutationOptions(options));

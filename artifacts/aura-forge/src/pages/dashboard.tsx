@@ -84,6 +84,10 @@ export default function DashboardPage() {
     .filter(p => p.parentProjectId === activeProjectId)
     .sort((a, b) => a.id - b.id)
 
+  // Free-text answer to activeProject.securityContextQuestion, submitted alongside
+  // the next "Improve Security" run so the hardening pass can use it.
+  const [hardenContext, setHardenContext] = useState("")
+
   const [targetNetwork, setTargetNetwork] = useState<string>("Ethereum Sepolia")
   const [isDeploying, setIsDeploying] = useState(false)
 
@@ -166,12 +170,16 @@ export default function DashboardPage() {
     }
   }
 
-  const handleImproveSecurity = async () => {
+  const handleImproveSecurity = async (context?: string) => {
     if (!activeProject || !displayedProjectId) return
 
     try {
       setIsImprovingSecurity(true)
-      const child = await createHardenJobMutation.mutateAsync({ id: displayedProjectId })
+      const child = await createHardenJobMutation.mutateAsync({
+        id: displayedProjectId,
+        data: context ? { context } : undefined,
+      })
+      setHardenContext("")
 
       setRunning(child.id, true)
       setLogsByProject(prev => ({
@@ -618,8 +626,31 @@ export default function DashboardPage() {
                 </div>
               )}
 
+              {activeProject.securityContextQuestion && (
+                <div className="mt-3 w-full bg-amber-500/10 border border-amber-500/20 rounded p-3 space-y-2">
+                  <p className="text-[11px] text-amber-400 font-mono leading-relaxed">
+                    Providing more detail would improve this recommendation: {activeProject.securityContextQuestion}
+                  </p>
+                  <Textarea
+                    value={hardenContext}
+                    onChange={(e) => setHardenContext(e.target.value)}
+                    placeholder="Answer here..."
+                    disabled={isForging || isDeploying || isImprovingSecurity}
+                    className="font-mono text-xs bg-background/50 min-h-16"
+                  />
+                  <Button
+                    onClick={() => handleImproveSecurity(hardenContext)}
+                    disabled={activeProject.status !== "success" || isForging || isDeploying || isImprovingSecurity || !hardenContext.trim()}
+                    className="w-full h-8 font-mono text-[11px] uppercase tracking-widest"
+                  >
+                    {isImprovingSecurity ? <Icons.Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Icons.Shield className="w-3.5 h-3.5 mr-2" />}
+                    Use This Info & Re-Harden
+                  </Button>
+                </div>
+              )}
+
               <Button
-                onClick={handleImproveSecurity}
+                onClick={() => handleImproveSecurity()}
                 disabled={activeProject.status !== "success" || isForging || isDeploying || isImprovingSecurity}
                 variant="outline"
                 className="w-full h-9 mt-4 font-mono text-xs uppercase tracking-widest border-primary/40 text-primary hover:bg-primary/10"

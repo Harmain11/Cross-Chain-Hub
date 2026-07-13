@@ -284,6 +284,12 @@ paths:
           required: true
           schema:
             type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HardenJobInput"
       responses:
         "201":
           description: Hardening job created, pending re-audit
@@ -439,6 +445,13 @@ components:
           type: string
           format: date-time
 
+    HardenJobInput:
+      type: object
+      properties:
+        context:
+          type: string
+          description: Optional additional business/context info from the user, used to seed the hardening prompt when the auditor flagged that more context would improve its recommendation.
+
     ContractProject:
       type: object
       required:
@@ -453,6 +466,8 @@ components:
         - abiOrIdl
         - securityScore
         - securityNotes
+        - securityContextQuestion
+        - userContext
         - compileLog
         - networkSelected
         - deploymentTxHash
@@ -486,6 +501,12 @@ components:
           type: ["integer", "null"]
         securityNotes:
           type: ["string", "null"]
+        securityContextQuestion:
+          type: ["string", "null"]
+          description: Set when the auditor determined a specific piece of business/context info would let it improve the score further; cleared once addressed or the target score is reached.
+        userContext:
+          type: ["string", "null"]
+          description: Additional context the user supplied for this project's hardening pass.
         compileLog:
           type: ["string", "null"]
         networkSelected:
