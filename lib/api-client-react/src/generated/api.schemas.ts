@@ -165,6 +165,16 @@ export interface TeamInvite {
   createdAt: string;
 }
 
+/**
+ * At least one of the two fields must be provided.
+ */
+export interface UpdateProjectCodeInput {
+  /** @minLength 1 */
+  smartContractCode?: string;
+  /** @minLength 1 */
+  testSuiteCode?: string;
+}
+
 export interface MonitoringConfigInput {
   enabled: boolean;
   /**

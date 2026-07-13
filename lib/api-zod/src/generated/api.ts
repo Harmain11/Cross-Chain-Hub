@@ -239,6 +239,60 @@ export const RecordDeploymentResponse = zod.object({
 
 
 /**
+ * Editing smartContractCode invalidates the stored analysis (securityScore, securityNotes, gasNotes/gasEstimates, compiledBytecode, compileLog, verification status) since it no longer reflects the edited code — re-run "Improve Security" or redeploy to refresh it.
+ * @summary Manually edit a project's smart contract source or test suite source, persisting the change
+ */
+export const UpdateProjectCodeParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+
+
+
+export const UpdateProjectCodeBody = zod.object({
+  "smartContractCode": zod.string().min(1).optional(),
+  "testSuiteCode": zod.string().min(1).optional()
+}).describe('At least one of the two fields must be provided.')
+
+export const UpdateProjectCodeResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.number(),
+  "teamId": zod.number().nullable().describe('Set when this project belongs to a team workspace instead of the creator\'s personal account.'),
+  "prompt": zod.string(),
+  "contractName": zod.string(),
+  "ecosystem": zod.enum(['EVM', 'SOLANA']),
+  "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "templateId": zod.string().nullable(),
+  "upgradeable": zod.boolean(),
+  "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
+  "smartContractCode": zod.string().nullable(),
+  "compiledBytecode": zod.string().nullable(),
+  "abiOrIdl": zod.string().nullable().describe('JSON-serialized ABI (EVM) or IDL (Solana)'),
+  "securityScore": zod.number().nullable(),
+  "securityNotes": zod.string().nullable(),
+  "securityContextQuestion": zod.string().nullable().describe('Set when the auditor determined a specific piece of business\/context info would let it improve the score further; cleared once addressed or the target score is reached.'),
+  "userContext": zod.string().nullable().describe('Additional context the user supplied for this project\'s hardening pass.'),
+  "testSuiteCode": zod.string().nullable().describe('Auto-generated test suite source matching the latest contract version (Foundry-style for EVM, Anchor\/TS for Solana), or null if generation hasn\'t run or failed.'),
+  "gasEstimates": zod.string().nullable().describe('JSON-serialized array of {functionSignature, gas} from solc (EVM only). Null for Solana or if unavailable.'),
+  "gasNotes": zod.string().nullable().describe('LLM-authored gas\/efficiency notes — grounded in real solc estimates for EVM, or a clearly-labeled estimate for Solana.'),
+  "compileLog": zod.string().nullable(),
+  "networkSelected": zod.string().nullable(),
+  "deploymentTxHash": zod.string().nullable(),
+  "liveDeployedAddress": zod.string().nullable(),
+  "verificationStatus": zod.string().nullable().describe('EVM-only source verification status after a deploy: pending|verified|failed, or null before any deploy.'),
+  "verificationUrl": zod.string().nullable().describe('Link to the verified-source page once verification succeeds.'),
+  "verificationError": zod.string().nullable().describe('Human-readable reason when verification fails.'),
+  "monitoringEnabled": zod.boolean().describe('Whether post-deploy activity monitoring is turned on for this project (EVM only).'),
+  "monitoringWebhookUrl": zod.string().nullable().describe('Webhook URL to POST alerts to when new on-chain activity is detected.'),
+  "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
+  "monitoringLastCheckedAt": zod.coerce.date().nullable(),
+  "monitoringLastAlertAt": zod.coerce.date().nullable(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Turn post-deploy activity monitoring on/off and configure alert delivery
  */
 export const UpdateMonitoringConfigParams = zod.object({
