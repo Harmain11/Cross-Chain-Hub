@@ -293,6 +293,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /projects/{id}/code:
+    patch:
+      operationId: updateProjectCode
+      tags: [projects]
+      summary: Manually edit a project's smart contract source or test suite source, persisting the change
+      description: >-
+        Editing smartContractCode invalidates the stored analysis (securityScore,
+        securityNotes, gasNotes/gasEstimates, compiledBytecode, compileLog,
+        verification status) since it no longer reflects the edited code —
+        re-run "Improve Security" or redeploy to refresh it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectCodeInput"
+      responses:
+        "200":
+          description: Updated contract project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractProject"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Project is mid-run and cannot be edited right now
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /projects/{id}/monitoring:
     patch:
       operationId: updateMonitoringConfig
@@ -930,6 +984,17 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    UpdateProjectCodeInput:
+      type: object
+      description: At least one of the two fields must be provided.
+      properties:
+        smartContractCode:
+          type: string
+          minLength: 1
+        testSuiteCode:
+          type: string
+          minLength: 1
 
     MonitoringConfigInput:
       type: object

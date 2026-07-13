@@ -15,6 +15,7 @@ import {
   useCreateHardenJob,
   useRecordDeployment,
   useUpdateMonitoringConfig,
+  useUpdateProjectCode,
   useListTeams,
   useCreateTeam,
   useListTeamMembers,
@@ -372,6 +373,50 @@ export default function DashboardPage() {
   const { data: lineage } = useGetProjectLineage(displayedProjectId as number, {
     query: { enabled: !!displayedProjectId && codeViewMode === "history" },
   })
+
+  // Free-editing of the generated code/tests in the Monaco panel. Edits are
+  // buffered locally (null = "no unsaved edit, show the server value") until
+  // explicitly saved via PATCH /projects/:id/code, which also invalidates any
+  // stored analysis that no longer matches a hand-edited contract.
+  const [editedSmartContractCode, setEditedSmartContractCode] = useState<string | null>(null)
+  const [editedTestSuiteCode, setEditedTestSuiteCode] = useState<string | null>(null)
+  const updateProjectCode = useUpdateProjectCode()
+
+  useEffect(() => {
+    setEditedSmartContractCode(null)
+    setEditedTestSuiteCode(null)
+  }, [displayedProjectId])
+
+  const codeIsDirty = editedSmartContractCode !== null && editedSmartContractCode !== (activeProject?.smartContractCode ?? "")
+  const testsAreDirty = editedTestSuiteCode !== null && editedTestSuiteCode !== (activeProject?.testSuiteCode ?? "")
+  const editorIsDirty = codeViewMode === "code" ? codeIsDirty : codeViewMode === "tests" ? testsAreDirty : false
+  const editingLocked = isForging || isDeploying || !displayedProjectId
+
+  const handleSaveEditedCode = async () => {
+    if (!displayedProjectId || editingLocked) return
+    if (codeViewMode !== "code" && codeViewMode !== "tests") return
+    if (!editorIsDirty) return
+
+    try {
+      const updated = await updateProjectCode.mutateAsync({
+        id: displayedProjectId,
+        data:
+          codeViewMode === "code"
+            ? { smartContractCode: editedSmartContractCode! }
+            : { testSuiteCode: editedTestSuiteCode! },
+      })
+      queryClient.setQueryData(getGetProjectQueryKey(displayedProjectId), updated)
+      if (codeViewMode === "code") setEditedSmartContractCode(null)
+      else setEditedTestSuiteCode(null)
+      toast.success(codeViewMode === "code" ? "Contract code saved." : "Test suite saved.")
+    } catch {
+      toast.error("Could not save your edit.")
+    }
+  }
+  // Kept in a ref so the Monaco Ctrl/Cmd+S command (registered once on mount)
+  // always calls the latest handler instead of one closed over stale state.
+  const handleSaveEditedCodeRef = useRef(handleSaveEditedCode)
+  handleSaveEditedCodeRef.current = handleSaveEditedCode
 
   const consoleEndRef = useRef<HTMLDivElement>(null)
 
@@ -1071,18 +1116,37 @@ export default function DashboardPage() {
                 : "IDLE"}
             </span>
             {activeProject && (
-              <div className="flex gap-1 pointer-events-auto">
+              <div className="flex items-center gap-1 pointer-events-auto">
+                {(codeViewMode === "code" || codeViewMode === "tests") && !editingLocked && (
+                  <>
+                    {editorIsDirty && (
+                      <span className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider text-amber-400 mr-1">
+                        <Icons.Pencil className="w-2.5 h-2.5" /> Unsaved
+                      </span>
+                    )}
+                    <button
+                      onClick={handleSaveEditedCode}
+                      disabled={!editorIsDirty || updateProjectCode.isPending}
+                      title="Save (Ctrl/Cmd+S)"
+                      className="px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border border-transparent text-muted-foreground hover:text-primary hover:border-primary/40 disabled:opacity-30 disabled:hover:text-muted-foreground disabled:hover:border-transparent flex items-center gap-1"
+                    >
+                      {updateProjectCode.isPending ? <Icons.Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Icons.Save className="w-2.5 h-2.5" />}
+                      Save
+                    </button>
+                    <span className="w-px h-4 bg-border mx-0.5" />
+                  </>
+                )}
                 <button
                   onClick={() => setCodeViewMode("code")}
                   className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border ${codeViewMode === "code" ? "border-primary/50 text-primary bg-primary/10" : "border-transparent text-muted-foreground hover:text-foreground"}`}
                 >
-                  Code
+                  Code{codeIsDirty && <span className="ml-1 opacity-70">●</span>}
                 </button>
                 <button
                   onClick={() => setCodeViewMode("tests")}
                   className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border ${codeViewMode === "tests" ? "border-primary/50 text-primary bg-primary/10" : "border-transparent text-muted-foreground hover:text-foreground"}`}
                 >
-                  Tests
+                  Tests{testsAreDirty && <span className="ml-1 opacity-70">●</span>}
                 </button>
                 <button
                   onClick={() => { setCodeViewMode("history"); setHistoryDiffIndex(null) }}
@@ -1153,16 +1217,31 @@ export default function DashboardPage() {
             </ScrollArea>
           ) : activeProject ? (
             <Editor
+              key={`${displayedProjectId}-${codeViewMode}`}
               height="100%"
               language={codeViewMode === "code" ? (activeProject.ecosystem === "EVM" ? "sol" : "rust") : (activeProject.ecosystem === "EVM" ? "sol" : "typescript")}
               theme="vs-dark"
               value={
                 codeViewMode === "code"
-                  ? activeProject.smartContractCode || "// Awaiting generation..."
-                  : activeProject.testSuiteCode || "// Test suite not generated yet."
+                  ? editedSmartContractCode ?? activeProject.smartContractCode ?? "// Awaiting generation..."
+                  : editedTestSuiteCode ?? activeProject.testSuiteCode ?? "// Test suite not generated yet."
               }
+              onChange={(value) => {
+                if (editingLocked) return
+                if (codeViewMode === "code") setEditedSmartContractCode(value ?? "")
+                else if (codeViewMode === "tests") setEditedTestSuiteCode(value ?? "")
+              }}
+              onMount={(editor, monaco) => {
+                // Freely editable + full copy/paste/cut, same as any normal text
+                // editor — only blocked while a job owns the row (isForging /
+                // isDeploying) or there's no project loaded.
+                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+                  handleSaveEditedCodeRef.current()
+                })
+              }}
               options={{
-                readOnly: true,
+                readOnly: editingLocked || codeViewMode === "history",
+                domReadOnly: editingLocked || codeViewMode === "history",
                 minimap: { enabled: false },
                 fontFamily: "'Space Mono', monospace",
                 fontSize: 14,

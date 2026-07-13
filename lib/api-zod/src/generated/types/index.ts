@@ -34,4 +34,5 @@ export * from './teamMember';
 export * from './teamMemberRole';
 export * from './teamMembershipSummary';
 export * from './teamMembershipSummaryRole';
+export * from './updateProjectCodeInput';
 export * from './user';

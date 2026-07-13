@@ -41,6 +41,7 @@ import type {
   TeamInvite,
   TeamMember,
   TeamMembershipSummary,
+  UpdateProjectCodeInput,
   User
 } from './api.schemas';
 
@@ -902,6 +903,79 @@ export const useRecordDeployment = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getRecordDeploymentMutationOptions(options));
+    }
+
+export const getUpdateProjectCodeUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/code`
+}
+
+/**
+ * Editing smartContractCode invalidates the stored analysis (securityScore, securityNotes, gasNotes/gasEstimates, compiledBytecode, compileLog, verification status) since it no longer reflects the edited code — re-run "Improve Security" or redeploy to refresh it.
+ * @summary Manually edit a project's smart contract source or test suite source, persisting the change
+ */
+export const updateProjectCode = async (id: number,
+    updateProjectCodeInput: UpdateProjectCodeInput, options?: RequestInit): Promise<ContractProject> => {
+
+  return customFetch<ContractProject>(getUpdateProjectCodeUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateProjectCodeInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateProjectCodeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProjectCode>>, TError,{id: number;data: BodyType<UpdateProjectCodeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateProjectCode>>, TError,{id: number;data: BodyType<UpdateProjectCodeInput>}, TContext> => {
+
+const mutationKey = ['updateProjectCode'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProjectCode>>, {id: number;data: BodyType<UpdateProjectCodeInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateProjectCode(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateProjectCodeMutationResult = NonNullable<Awaited<ReturnType<typeof updateProjectCode>>>
+    export type UpdateProjectCodeMutationBody = BodyType<UpdateProjectCodeInput>
+    export type UpdateProjectCodeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Manually edit a project's smart contract source or test suite source, persisting the change
+ */
+export const useUpdateProjectCode = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProjectCode>>, TError,{id: number;data: BodyType<UpdateProjectCodeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateProjectCode>>,
+        TError,
+        {id: number;data: BodyType<UpdateProjectCodeInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateProjectCodeMutationOptions(options));
     }
 
 export const getUpdateMonitoringConfigUrl = (id: number,) => {

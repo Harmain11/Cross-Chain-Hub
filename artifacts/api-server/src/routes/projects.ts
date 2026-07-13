@@ -12,6 +12,8 @@ import {
   GetProjectLineageResponse,
   UpdateMonitoringConfigBody,
   UpdateMonitoringConfigResponse,
+  UpdateProjectCodeBody,
+  UpdateProjectCodeResponse,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { runHardenOnlyPipeline } from "../lib/forge/pipeline";
@@ -319,6 +321,69 @@ router.patch("/projects/:id/deploy", async (req, res) => {
       )
       .catch((err) => logger.error({ err, projectId: id }, "Verification pipeline crashed"));
   }
+});
+
+// Statuses where a background job still owns the row; edits are rejected
+// while one of these is in flight to avoid racing the pipeline's own writes.
+const IN_FLIGHT_STATUSES = new Set(["pending", "generating", "compiling", "healing", "hardening"]);
+
+router.patch("/projects/:id/code", async (req, res) => {
+  const id = Number(req.params.id);
+  const parsed = UpdateProjectCodeBody.safeParse(req.body);
+  if (!parsed.success || (parsed.data.smartContractCode === undefined && parsed.data.testSuiteCode === undefined)) {
+    res.status(400).json({ error: "Provide smartContractCode and/or testSuiteCode" });
+    return;
+  }
+
+  const accessible = await loadAccessibleProject(req.session.userId!, id);
+  if (!accessible) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const existing = accessible.row;
+
+  if (IN_FLIGHT_STATUSES.has(existing.status)) {
+    res.status(409).json({ error: "This project is mid-run and can't be edited right now" });
+    return;
+  }
+
+  const editedContractCode =
+    parsed.data.smartContractCode !== undefined &&
+    parsed.data.smartContractCode !== existing.smartContractCode;
+
+  const [updated] = await db
+    .update(contractProjectsTable)
+    .set({
+      ...(parsed.data.smartContractCode !== undefined ? { smartContractCode: parsed.data.smartContractCode } : {}),
+      ...(parsed.data.testSuiteCode !== undefined ? { testSuiteCode: parsed.data.testSuiteCode } : {}),
+      // A manual edit to the contract source invalidates every analysis that
+      // was computed against the old code — stale scores/notes/bytecode would
+      // otherwise be shown (and deployable) alongside code that was never
+      // actually audited or compiled.
+      ...(editedContractCode
+        ? {
+            securityScore: null,
+            securityNotes: null,
+            securityContextQuestion: null,
+            gasNotes: null,
+            gasEstimates: null,
+            compiledBytecode: null,
+            compileLog: null,
+            verificationStatus: null,
+            verificationUrl: null,
+            verificationError: null,
+          }
+        : {}),
+    })
+    .where(eq(contractProjectsTable.id, id))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  res.json(UpdateProjectCodeResponse.parse(updated));
 });
 
 router.patch("/projects/:id/monitoring", async (req, res) => {
