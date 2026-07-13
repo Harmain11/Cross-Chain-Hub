@@ -13,6 +13,7 @@ import {
   useGetProjectsSummary, 
   useGetProject,
   useCreateForgeJob,
+  useCreateHardenJob,
   useRecordDeployment,
   getGetProjectQueryKey,
   getListProjectsQueryKey,
@@ -38,21 +39,51 @@ export default function DashboardPage() {
   const { data: user, isLoading: userLoading, error: userError } = useGetCurrentUser({ query: { retry: false }})
   const logoutMutation = useLogout()
   const createJobMutation = useCreateForgeJob()
+  const createHardenJobMutation = useCreateHardenJob()
   const recordDeploymentMutation = useRecordDeployment()
 
   const { data: projects = [] } = useListProjects({ query: { enabled: !!user }})
   const { data: summary } = useGetProjectsSummary({ query: { enabled: !!user }})
 
+  // The project selected from history — its "Improve Security" re-runs open as
+  // extra tabs alongside it, without leaving the history list.
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null)
-  const { data: activeProject, refetch: refetchActiveProject } = useGetProject(activeProjectId as number, { query: { enabled: !!activeProjectId }})
+  // Which tab (activeProjectId itself, or one of its hardening children) is
+  // currently displayed in the editor/console/deploy panel.
+  const [displayedProjectId, setDisplayedProjectId] = useState<number | null>(null)
+  const { data: activeProject, refetch: refetchActiveProject } = useGetProject(displayedProjectId as number, { query: { enabled: !!displayedProjectId }})
 
   const [ecosystem, setEcosystem] = useState<"EVM" | "SOLANA">("EVM")
   const [prompt, setPrompt] = useState("")
   const [contractName, setContractName] = useState("")
 
-  const [consoleLogs, setConsoleLogs] = useState<PhaseMessage[]>([])
-  const [isForging, setIsForging] = useState(false)
-  
+  // Console output and running-state are tracked per project id so each tab
+  // (original job or a hardening re-run) only shows its own log.
+  const [logsByProject, setLogsByProject] = useState<Record<number, PhaseMessage[]>>({})
+  const [runningProjectIds, setRunningProjectIds] = useState<Set<number>>(new Set())
+  const [isImprovingSecurity, setIsImprovingSecurity] = useState(false)
+
+  const consoleLogs = displayedProjectId ? logsByProject[displayedProjectId] ?? [] : []
+  const isForging = displayedProjectId ? runningProjectIds.has(displayedProjectId) : false
+
+  const appendLog = (projectId: number, log: PhaseMessage) => {
+    setLogsByProject(prev => ({ ...prev, [projectId]: [...(prev[projectId] ?? []), log] }))
+  }
+  const setRunning = (projectId: number, running: boolean) => {
+    setRunningProjectIds(prev => {
+      const next = new Set(prev)
+      if (running) next.add(projectId)
+      else next.delete(projectId)
+      return next
+    })
+  }
+
+  // Hardening re-runs of the currently selected history project, oldest first —
+  // rendered as extra tabs next to the "Original" tab.
+  const hardenTabs = projects
+    .filter(p => p.parentProjectId === activeProjectId)
+    .sort((a, b) => a.id - b.id)
+
   const [targetNetwork, setTargetNetwork] = useState<string>("Ethereum Sepolia")
   const [isDeploying, setIsDeploying] = useState(false)
 
@@ -84,14 +115,14 @@ export default function DashboardPage() {
     }
 
     try {
-      setIsForging(true)
-      setConsoleLogs([{ phase: "init", message: "Initializing forge job..." }])
-      
       const newJob = await createJobMutation.mutateAsync({
         data: { prompt, contractName, ecosystem }
       })
 
+      setRunning(newJob.id, true)
+      setLogsByProject(prev => ({ ...prev, [newJob.id]: [{ phase: "init", message: "Initializing forge job..." }] }))
       setActiveProjectId(newJob.id)
+      setDisplayedProjectId(newJob.id)
       queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() })
 
       // Start SSE Stream
@@ -101,9 +132,9 @@ export default function DashboardPage() {
         try {
           const data = JSON.parse(event.data)
           if (data.phase === "done") {
-            setConsoleLogs(prev => [...prev, { phase: "done", message: "Forge complete." }])
+            appendLog(newJob.id, { phase: "done", message: "Forge complete." })
             eventSource.close()
-            setIsForging(false)
+            setRunning(newJob.id, false)
             queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(newJob.id) })
             queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() })
             queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() })
@@ -111,13 +142,13 @@ export default function DashboardPage() {
             setPrompt("")
             setContractName("")
           } else if (data.phase === "error") {
-            setConsoleLogs(prev => [...prev, { phase: "error", message: `ERROR: ${data.message}` }])
+            appendLog(newJob.id, { phase: "error", message: `ERROR: ${data.message}` })
             eventSource.close()
-            setIsForging(false)
+            setRunning(newJob.id, false)
             toast.error("Forge job failed")
             queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(newJob.id) })
           } else {
-            setConsoleLogs(prev => [...prev, { phase: data.phase, message: data.message }])
+            appendLog(newJob.id, { phase: data.phase, message: data.message })
           }
         } catch (e) {
           console.error("Failed to parse SSE data", e)
@@ -127,17 +158,70 @@ export default function DashboardPage() {
       eventSource.onerror = (e) => {
         console.error("SSE Error", e)
         eventSource.close()
-        setIsForging(false)
+        setRunning(newJob.id, false)
       }
 
     } catch (err: any) {
-      setIsForging(false)
       toast.error(err?.data?.error || err?.message || "Failed to start forge job")
     }
   }
 
+  const handleImproveSecurity = async () => {
+    if (!activeProject || !displayedProjectId) return
+
+    try {
+      setIsImprovingSecurity(true)
+      const child = await createHardenJobMutation.mutateAsync({ id: displayedProjectId })
+
+      setRunning(child.id, true)
+      setLogsByProject(prev => ({
+        ...prev,
+        [child.id]: [{ phase: "init", message: `Starting a new security-hardening pass on "${activeProject.contractName}"...` }],
+      }))
+      setDisplayedProjectId(child.id)
+      queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() })
+
+      const eventSource = new EventSource(`${import.meta.env.BASE_URL}api/projects/${child.id}/harden-stream`, { withCredentials: true })
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.phase === "done") {
+            appendLog(child.id, { phase: "done", message: "Hardening pass complete." })
+            eventSource.close()
+            setRunning(child.id, false)
+            queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(child.id) })
+            queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() })
+            queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() })
+            refetchActiveProject()
+          } else if (data.phase === "error") {
+            appendLog(child.id, { phase: "error", message: `ERROR: ${data.message}` })
+            eventSource.close()
+            setRunning(child.id, false)
+            toast.error("Hardening job failed")
+            queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(child.id) })
+          } else {
+            appendLog(child.id, { phase: data.phase, message: data.message })
+          }
+        } catch (e) {
+          console.error("Failed to parse SSE data", e)
+        }
+      }
+
+      eventSource.onerror = (e) => {
+        console.error("SSE Error", e)
+        eventSource.close()
+        setRunning(child.id, false)
+      }
+    } catch (err: any) {
+      toast.error(err?.data?.error || err?.message || "Failed to start hardening job")
+    } finally {
+      setIsImprovingSecurity(false)
+    }
+  }
+
   const handleDeploy = async () => {
-    if (!activeProject || !activeProjectId) return
+    if (!activeProject || !displayedProjectId) return
     
     setIsDeploying(true)
     
@@ -151,7 +235,7 @@ export default function DashboardPage() {
           throw new Error("No injected Ethereum wallet found (e.g. MetaMask). Please install one.")
         }
 
-        setConsoleLogs(prev => [...prev, { phase: "deploy", message: "Requesting wallet connection..." }])
+        appendLog(displayedProjectId, { phase: "deploy", message: "Requesting wallet connection..." })
         
         const walletClient = createWalletClient({
           transport: custom(window.ethereum)
@@ -167,7 +251,7 @@ export default function DashboardPage() {
           rpcUrl = "https://sepolia.base.org"
         }
 
-        setConsoleLogs(prev => [...prev, { phase: "deploy", message: `Switching to ${chain.name}...` }])
+        appendLog(displayedProjectId, { phase: "deploy", message: `Switching to ${chain.name}...` })
         
         try {
           await walletClient.switchChain({ id: chain.id })
@@ -185,7 +269,7 @@ export default function DashboardPage() {
           transport: http(rpcUrl)
         })
 
-        setConsoleLogs(prev => [...prev, { phase: "deploy", message: "Broadcasting deployment transaction..." }])
+        appendLog(displayedProjectId, { phase: "deploy", message: "Broadcasting deployment transaction..." })
 
         const abi = JSON.parse(activeProject.abiOrIdl)
         const hash = await walletClient.deployContract({
@@ -194,7 +278,7 @@ export default function DashboardPage() {
           account
         })
 
-        setConsoleLogs(prev => [...prev, { phase: "deploy", message: `Tx Hash: ${hash}. Waiting for confirmation...` }])
+        appendLog(displayedProjectId, { phase: "deploy", message: `Tx Hash: ${hash}. Waiting for confirmation...` })
 
         const receipt = await publicClient.waitForTransactionReceipt({ hash })
         
@@ -202,10 +286,10 @@ export default function DashboardPage() {
           throw new Error("Deployment failed, no contract address in receipt")
         }
 
-        setConsoleLogs(prev => [...prev, { phase: "deploy", message: `Deployed at ${receipt.contractAddress}` }])
+        appendLog(displayedProjectId, { phase: "deploy", message: `Deployed at ${receipt.contractAddress}` })
         
         await recordDeploymentMutation.mutateAsync({
-          id: activeProjectId,
+          id: displayedProjectId,
           data: {
             networkSelected: targetNetwork,
             deploymentTxHash: hash,
@@ -220,11 +304,11 @@ export default function DashboardPage() {
           throw new Error("No Solana wallet found. Please install Phantom or Backpack.")
         }
         
-        setConsoleLogs(prev => [...prev, { phase: "deploy", message: "Requesting Solana wallet connection..." }])
+        appendLog(displayedProjectId, { phase: "deploy", message: "Requesting Solana wallet connection..." })
         const resp = await window.solana.connect()
         const pubKey = resp.publicKey
 
-        setConsoleLogs(prev => [...prev, { phase: "deploy", message: "Preparing Devnet verification broadcast..." }])
+        appendLog(displayedProjectId, { phase: "deploy", message: "Preparing Devnet verification broadcast..." })
         
         const connection = new Connection(clusterApiUrl("devnet"), "confirmed")
         const transaction = new Transaction().add(
@@ -239,18 +323,18 @@ export default function DashboardPage() {
         const { blockhash } = await connection.getLatestBlockhash()
         transaction.recentBlockhash = blockhash
 
-        setConsoleLogs(prev => [...prev, { phase: "deploy", message: "Requesting signature..." }])
+        appendLog(displayedProjectId, { phase: "deploy", message: "Requesting signature..." })
         const signed = await window.solana.signTransaction(transaction)
         const signature = await connection.sendRawTransaction(signed.serialize())
         
-        setConsoleLogs(prev => [...prev, { phase: "deploy", message: `Tx Signature: ${signature}. Verifying...` }])
+        appendLog(displayedProjectId, { phase: "deploy", message: `Tx Signature: ${signature}. Verifying...` })
         await connection.confirmTransaction(signature, "confirmed")
 
         const mockAddress = Keypair.generate().publicKey.toString()
-        setConsoleLogs(prev => [...prev, { phase: "deploy", message: `Simulated program ID: ${mockAddress} (Devnet Broadcast Anchor Only)` }])
+        appendLog(displayedProjectId, { phase: "deploy", message: `Simulated program ID: ${mockAddress} (Devnet Broadcast Anchor Only)` })
 
         await recordDeploymentMutation.mutateAsync({
-          id: activeProjectId,
+          id: displayedProjectId,
           data: {
             networkSelected: "Solana Devnet",
             deploymentTxHash: signature,
@@ -261,12 +345,12 @@ export default function DashboardPage() {
         toast.success("Verification broadcast recorded")
       }
       
-      queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(activeProjectId) })
+      queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(displayedProjectId) })
       queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() })
       queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() })
 
     } catch (err: any) {
-      setConsoleLogs(prev => [...prev, { phase: "error", message: `DEPLOYMENT ERROR: ${err.message || "Unknown error"}` }])
+      appendLog(displayedProjectId, { phase: "error", message: `DEPLOYMENT ERROR: ${err.message || "Unknown error"}` })
       toast.error(err.message || "Deployment failed")
     } finally {
       setIsDeploying(false)
@@ -380,12 +464,15 @@ export default function DashboardPage() {
             </div>
             <ScrollArea className="flex-1">
               <div className="p-2 space-y-1">
-                {projects.map((proj) => (
+                {projects.filter(proj => !proj.parentProjectId).map((proj) => (
                   <button
                     key={proj.id}
                     onClick={() => {
                       setActiveProjectId(proj.id)
-                      setConsoleLogs([{ phase: "sys", message: `Loaded project: ${proj.contractName} [${proj.id}]` }])
+                      setDisplayedProjectId(proj.id)
+                      if (!logsByProject[proj.id]) {
+                        setLogsByProject(prev => ({ ...prev, [proj.id]: [{ phase: "sys", message: `Loaded project: ${proj.contractName} [${proj.id}]` }] }))
+                      }
                     }}
                     className={`w-full text-left p-2 rounded flex items-center justify-between group transition-colors font-mono text-xs ${activeProjectId === proj.id ? 'bg-primary/20 border border-primary/50 text-primary-foreground' : 'bg-transparent border border-transparent hover:bg-white/5 text-muted-foreground'}`}
                   >
@@ -407,6 +494,28 @@ export default function DashboardPage() {
 
       {/* Center Panel: Code & Console */}
       <div className="flex-1 flex flex-col min-w-0 bg-black relative">
+        {activeProjectId && (
+          <div className="h-9 min-h-[2.25rem] border-b border-border bg-card/40 flex items-center px-2 gap-1 overflow-x-auto shrink-0">
+            <button
+              onClick={() => setDisplayedProjectId(activeProjectId)}
+              className={`px-3 h-7 rounded-t font-mono text-[11px] uppercase tracking-wider whitespace-nowrap transition-colors flex items-center gap-1.5 ${displayedProjectId === activeProjectId ? 'bg-black text-primary border-t border-x border-primary/40' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {runningProjectIds.has(activeProjectId) && <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />}
+              Original
+            </button>
+            {hardenTabs.map((tab, i) => (
+              <button
+                key={tab.id}
+                onClick={() => setDisplayedProjectId(tab.id)}
+                className={`px-3 h-7 rounded-t font-mono text-[11px] uppercase tracking-wider whitespace-nowrap transition-colors flex items-center gap-1.5 ${displayedProjectId === tab.id ? 'bg-black text-primary border-t border-x border-primary/40' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {runningProjectIds.has(tab.id) && <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />}
+                Security Pass {i + 1}
+                {tab.securityScore !== null && <span className="opacity-60">({tab.securityScore})</span>}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex-1 relative border-b border-border group">
           <div className="absolute top-0 left-0 right-0 h-10 bg-gradient-to-b from-black/80 to-transparent z-10 pointer-events-none flex items-center px-4">
             <span className="text-xs font-mono text-muted-foreground opacity-50 uppercase tracking-widest">{activeProject ? `${activeProject.contractName}.${activeProject.ecosystem === "EVM" ? "sol" : "rs"}` : "IDLE"}</span>
@@ -508,6 +617,16 @@ export default function DashboardPage() {
                   {activeProject.securityNotes}
                 </div>
               )}
+
+              <Button
+                onClick={handleImproveSecurity}
+                disabled={activeProject.status !== "success" || isForging || isDeploying || isImprovingSecurity}
+                variant="outline"
+                className="w-full h-9 mt-4 font-mono text-xs uppercase tracking-widest border-primary/40 text-primary hover:bg-primary/10"
+              >
+                {isImprovingSecurity ? <Icons.Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Icons.Shield className="w-3.5 h-3.5 mr-2" />}
+                Improve Security
+              </Button>
             </div>
 
             <div className="flex-1 p-6 flex flex-col justify-end bg-black/10">
