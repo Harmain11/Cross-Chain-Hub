@@ -14,6 +14,7 @@ export * from './ecosystem';
 export * from './errorResponse';
 export * from './forgeContractInput';
 export * from './forgeStatus';
+export * from './hardenJobInput';
 export * from './healthStatus';
 export * from './projectsSummary';
 export * from './user';

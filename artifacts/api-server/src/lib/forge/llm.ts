@@ -85,11 +85,15 @@ export async function hardenSolidityContract(
   securityNotes: string,
   score: number,
   contractName: string,
+  userContext?: string,
 ): Promise<string> {
   const system =
     "You are a senior smart-contract security engineer performing a remediation pass. Given a Solidity contract and an auditor's findings, rewrite the contract to fix EVERY flagged issue (access control, reentrancy, integer issues, unchecked external calls, missing validation, etc.) while preserving the contract's original functionality and public interface as much as possible. " +
     "Rules: keep the contract named exactly the given name; it MUST NOT require constructor arguments; no external imports; respond with ONLY a single fenced ```solidity code block containing the full corrected file, no prose before or after.";
-  const user = `This Solidity contract named "${contractName}" scored ${score}/100 in a security audit.\n\nCONTRACT:\n${code}\n\nAUDITOR FINDINGS:\n${securityNotes}\n\nRewrite the contract to remediate every finding and maximize its security score, without breaking compilation.`;
+  const contextBlock = userContext
+    ? `\n\nADDITIONAL CONTEXT FROM THE USER (use this to resolve ambiguity, e.g. intended access control or business logic):\n${userContext}`
+    : "";
+  const user = `This Solidity contract named "${contractName}" scored ${score}/100 in a security audit.\n\nCONTRACT:\n${code}\n\nAUDITOR FINDINGS:\n${securityNotes}${contextBlock}\n\nRewrite the contract to remediate every finding and maximize its security score, without breaking compilation.`;
   const text = await ask(system, user);
   return extractCodeBlock(text);
 }
@@ -100,11 +104,15 @@ export async function hardenAnchorContract(
   securityNotes: string,
   score: number,
   contractName: string,
+  userContext?: string,
 ): Promise<{ code: string; idl: string }> {
   const system =
     "You are a senior Solana/Anchor security engineer performing a remediation pass. Given an Anchor (Rust) program, its IDL, and an auditor's findings, rewrite BOTH the program and its IDL to fix EVERY flagged issue (PDA seed misuse, missing signer/owner checks, missing account validation, arithmetic overflow, etc.) while preserving the program's original functionality. " +
     "Rules: the program module name should reflect the given contract name; respond with the corrected Rust source in a single fenced ```rust code block, followed by the corrected IDL JSON in a single fenced ```json code block. No other prose.";
-  const user = `This Anchor program named "${contractName}" scored ${score}/100 in a security audit.\n\nPROGRAM:\n${code}\n\nIDL:\n${idl}\n\nAUDITOR FINDINGS:\n${securityNotes}\n\nRewrite the program and IDL to remediate every finding and maximize its security score.`;
+  const contextBlock = userContext
+    ? `\n\nADDITIONAL CONTEXT FROM THE USER (use this to resolve ambiguity, e.g. intended access control or business logic):\n${userContext}`
+    : "";
+  const user = `This Anchor program named "${contractName}" scored ${score}/100 in a security audit.\n\nPROGRAM:\n${code}\n\nIDL:\n${idl}\n\nAUDITOR FINDINGS:\n${securityNotes}${contextBlock}\n\nRewrite the program and IDL to remediate every finding and maximize its security score.`;
   const text = await ask(system, user);
 
   const blocks = [
@@ -128,17 +136,21 @@ export async function hardenAnchorContract(
 export async function scoreContractSecurity(
   code: string,
   ecosystem: "EVM" | "SOLANA",
-): Promise<{ score: number; notes: string }> {
+): Promise<{ score: number; notes: string; contextQuestion: string | null }> {
   const system =
-    "You are a smart-contract security auditor. Given source code, respond with ONLY a single fenced ```json code block: {\"score\": <integer 0-100>, \"notes\": \"<one or two sentence summary of the biggest risk or why it's solid>\"}. No other prose.";
+    "You are a smart-contract security auditor. Given source code, respond with ONLY a single fenced ```json code block: " +
+    '{"score": <integer 0-100>, "notes": "<one or two sentence summary of the biggest risk or why it\'s solid>", "contextQuestion": <a short question asking the developer for the SPECIFIC business/product context you would need to judge or fix the biggest remaining risk (e.g. who should be authorized to call a function, expected token economics), or null if no such context is missing>}. ' +
+    "No other prose.";
   const user = `Audit this ${ecosystem === "EVM" ? "Solidity" : "Anchor/Rust"} contract and score it:\n\n${code}`;
   const text = await ask(system, user);
   const parsed = JSON.parse(extractJsonBlock(text)) as {
     score: number;
     notes: string;
+    contextQuestion?: string | null;
   };
   return {
     score: Math.max(0, Math.min(100, Math.round(parsed.score))),
     notes: parsed.notes,
+    contextQuestion: parsed.contextQuestion ?? null,
   };
 }

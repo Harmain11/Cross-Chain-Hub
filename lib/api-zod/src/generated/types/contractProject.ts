@@ -33,6 +33,16 @@ export interface ContractProject {
   securityScore: number | null;
   /** @nullable */
   securityNotes: string | null;
+  /**
+     * Set when the auditor determined a specific piece of business/context info would let it improve the score further; cleared once addressed or the target score is reached.
+     * @nullable
+     */
+  securityContextQuestion: string | null;
+  /**
+     * Additional context the user supplied for this project's hardening pass.
+     * @nullable
+     */
+  userContext: string | null;
   /** @nullable */
   compileLog: string | null;
   /** @nullable */

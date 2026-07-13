@@ -8,3 +8,4 @@
 - [New pipeline status values need OpenAPI enum updates](pipeline-status-enum-sync.md) — adding a new status value to a DB text column (e.g. a new job phase) 500s every list/get endpoint until the OpenAPI/Zod response enum is updated too.
 - [New DB column breaks hand-mapped list endpoints](hand-mapped-list-endpoint-new-column.md) — adding a required field to an OpenAPI response schema 500s any route that hand-builds its response object field-by-field instead of spreading the row.
 - [drizzle-kit push vs runtime-managed tables](drizzle-push-runtime-table-exclusion.md) — `drizzle-kit push` proposes dropping tables a library creates at runtime (e.g. connect-pg-simple's session table) unless excluded via `tablesFilter`.
+- [Forge hardening context-question flow](forge-hardening-context-question.md) — when hardening stalls below target, the auditor can ask the user a specific context question instead of just retrying blindly.
