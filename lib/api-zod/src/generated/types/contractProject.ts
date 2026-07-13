@@ -15,6 +15,11 @@ export interface ContractProject {
   contractName: string;
   ecosystem: Ecosystem;
   status: ForgeStatus;
+  /**
+     * Set when this project is an "Improve Security" re-run of another project
+     * @nullable
+     */
+  parentProjectId: number | null;
   /** @nullable */
   smartContractCode: string | null;
   /** @nullable */

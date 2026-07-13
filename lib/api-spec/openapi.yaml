@@ -273,6 +273,64 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /projects/{id}/harden:
+    post:
+      operationId: createHardenJob
+      tags: [forge]
+      summary: Start a new on-demand security-hardening re-run of an existing successful project (creates a new linked child project row)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "201":
+          description: Hardening job created, pending re-audit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractProject"
+        "400":
+          description: Source project is not eligible for hardening (must have completed successfully)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /projects/{id}/harden-stream:
+    get:
+      operationId: streamHardenJob
+      tags: [forge]
+      summary: Server-sent events stream of a hardening job's progress (id refers to the child project created by POST /projects/{id}/harden)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: text/event-stream of forge phase events
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -356,6 +414,7 @@ components:
         - deploymentTxHash
         - liveDeployedAddress
         - createdAt
+        - parentProjectId
       properties:
         id:
           type: integer
@@ -367,6 +426,9 @@ components:
           $ref: "#/components/schemas/ForgeStatus"
         securityScore:
           type: ["integer", "null"]
+        parentProjectId:
+          type: ["integer", "null"]
+          description: Set when this project is an "Improve Security" re-run of another project
         networkSelected:
           type: ["string", "null"]
         deploymentTxHash:
@@ -396,6 +458,7 @@ components:
         - deploymentTxHash
         - liveDeployedAddress
         - createdAt
+        - parentProjectId
       properties:
         id:
           type: integer
@@ -409,6 +472,9 @@ components:
           $ref: "#/components/schemas/Ecosystem"
         status:
           $ref: "#/components/schemas/ForgeStatus"
+        parentProjectId:
+          type: ["integer", "null"]
+          description: Set when this project is an "Improve Security" re-run of another project
         smartContractCode:
           type: ["string", "null"]
         compiledBytecode:

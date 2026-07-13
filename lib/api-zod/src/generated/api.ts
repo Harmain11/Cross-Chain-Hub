@@ -80,6 +80,7 @@ export const ListProjectsResponseItem = zod.object({
   "ecosystem": zod.enum(['EVM', 'SOLANA']),
   "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
   "securityScore": zod.number().nullable(),
+  "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
   "networkSelected": zod.string().nullable(),
   "deploymentTxHash": zod.string().nullable(),
   "liveDeployedAddress": zod.string().nullable(),
@@ -114,6 +115,7 @@ export const GetProjectResponse = zod.object({
   "contractName": zod.string(),
   "ecosystem": zod.enum(['EVM', 'SOLANA']),
   "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
   "smartContractCode": zod.string().nullable(),
   "compiledBytecode": zod.string().nullable(),
   "abiOrIdl": zod.string().nullable().describe('JSON-serialized ABI (EVM) or IDL (Solana)'),
@@ -157,6 +159,7 @@ export const RecordDeploymentResponse = zod.object({
   "contractName": zod.string(),
   "ecosystem": zod.enum(['EVM', 'SOLANA']),
   "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
   "smartContractCode": zod.string().nullable(),
   "compiledBytecode": zod.string().nullable(),
   "abiOrIdl": zod.string().nullable().describe('JSON-serialized ABI (EVM) or IDL (Solana)'),
@@ -191,6 +194,7 @@ export const CreateForgeJobResponse = zod.object({
   "contractName": zod.string(),
   "ecosystem": zod.enum(['EVM', 'SOLANA']),
   "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
   "smartContractCode": zod.string().nullable(),
   "compiledBytecode": zod.string().nullable(),
   "abiOrIdl": zod.string().nullable().describe('JSON-serialized ABI (EVM) or IDL (Solana)'),
@@ -202,5 +206,43 @@ export const CreateForgeJobResponse = zod.object({
   "liveDeployedAddress": zod.string().nullable(),
   "createdAt": zod.coerce.date()
 })
+
+
+/**
+ * @summary Start a new on-demand security-hardening re-run of an existing successful project (creates a new linked child project row)
+ */
+export const CreateHardenJobParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const CreateHardenJobResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.number(),
+  "prompt": zod.string(),
+  "contractName": zod.string(),
+  "ecosystem": zod.enum(['EVM', 'SOLANA']),
+  "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
+  "smartContractCode": zod.string().nullable(),
+  "compiledBytecode": zod.string().nullable(),
+  "abiOrIdl": zod.string().nullable().describe('JSON-serialized ABI (EVM) or IDL (Solana)'),
+  "securityScore": zod.number().nullable(),
+  "securityNotes": zod.string().nullable(),
+  "compileLog": zod.string().nullable(),
+  "networkSelected": zod.string().nullable(),
+  "deploymentTxHash": zod.string().nullable(),
+  "liveDeployedAddress": zod.string().nullable(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Server-sent events stream of a hardening job's progress (id refers to the child project created by POST /projects/{id}/harden)
+ */
+export const StreamHardenJobParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const StreamHardenJobResponse = zod.unknown()
 
 

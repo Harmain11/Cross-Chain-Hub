@@ -7,8 +7,11 @@ import {
   GetProjectResponse,
   RecordDeploymentBody,
   RecordDeploymentResponse,
+  CreateHardenJobResponse,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
+import { runHardenOnlyPipeline } from "../lib/forge/pipeline";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -29,6 +32,7 @@ router.get("/projects", async (req, res) => {
         ecosystem: row.ecosystem,
         status: row.status,
         securityScore: row.securityScore,
+        parentProjectId: row.parentProjectId,
         networkSelected: row.networkSelected,
         deploymentTxHash: row.deploymentTxHash,
         liveDeployedAddress: row.liveDeployedAddress,
@@ -135,6 +139,108 @@ router.patch("/projects/:id/deploy", async (req, res) => {
   }
 
   res.json(RecordDeploymentResponse.parse(updated));
+});
+
+router.post("/projects/:id/harden", async (req, res) => {
+  const id = Number(req.params.id);
+  const [parent] = await db
+    .select()
+    .from(contractProjectsTable)
+    .where(
+      and(
+        eq(contractProjectsTable.id, id),
+        eq(contractProjectsTable.userId, req.session.userId!),
+      ),
+    )
+    .limit(1);
+
+  if (!parent) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  if (parent.status !== "success" || !parent.smartContractCode) {
+    res
+      .status(400)
+      .json({ error: "Only a successfully forged project can be hardened further" });
+    return;
+  }
+
+  const [child] = await db
+    .insert(contractProjectsTable)
+    .values({
+      userId: req.session.userId!,
+      prompt: parent.prompt,
+      contractName: parent.contractName,
+      ecosystem: parent.ecosystem,
+      parentProjectId: parent.id,
+      status: "pending",
+    })
+    .returning();
+
+  if (!child) {
+    res.status(500).json({ error: "Failed to create hardening job" });
+    return;
+  }
+
+  res.status(201).json(CreateHardenJobResponse.parse(child));
+});
+
+router.get("/projects/:id/harden-stream", async (req, res) => {
+  const id = Number(req.params.id);
+  const [child] = await db
+    .select()
+    .from(contractProjectsTable)
+    .where(
+      and(
+        eq(contractProjectsTable.id, id),
+        eq(contractProjectsTable.userId, req.session.userId!),
+      ),
+    )
+    .limit(1);
+
+  if (!child || child.parentProjectId === null) {
+    res.status(404).json({ error: "Hardening job not found" });
+    return;
+  }
+
+  const [parent] = await db
+    .select()
+    .from(contractProjectsTable)
+    .where(
+      and(
+        eq(contractProjectsTable.id, child.parentProjectId),
+        eq(contractProjectsTable.userId, req.session.userId!),
+      ),
+    )
+    .limit(1);
+
+  if (!parent) {
+    res.status(404).json({ error: "Source project not found" });
+    return;
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const send = (event: unknown) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  const heartbeat = setInterval(() => res.write(": ping\n\n"), 15000);
+  req.on("close", () => clearInterval(heartbeat));
+
+  try {
+    await runHardenOnlyPipeline(child, parent, send);
+  } catch (err) {
+    logger.error({ err }, "Hardening pipeline crashed");
+    send({ phase: "error", message: "Hardening job crashed unexpectedly." });
+  } finally {
+    clearInterval(heartbeat);
+    res.end();
+  }
 });
 
 export default router;

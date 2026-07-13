@@ -871,3 +871,151 @@ export const useCreateForgeJob = <TError = ErrorType<ErrorResponse>,
       return useMutation(getCreateForgeJobMutationOptions(options));
     }
 
+export const getCreateHardenJobUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/harden`
+}
+
+/**
+ * @summary Start a new on-demand security-hardening re-run of an existing successful project (creates a new linked child project row)
+ */
+export const createHardenJob = async (id: number, options?: RequestInit): Promise<ContractProject> => {
+
+  return customFetch<ContractProject>(getCreateHardenJobUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateHardenJobMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHardenJob>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createHardenJob>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['createHardenJob'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createHardenJob>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  createHardenJob(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateHardenJobMutationResult = NonNullable<Awaited<ReturnType<typeof createHardenJob>>>
+
+    export type CreateHardenJobMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Start a new on-demand security-hardening re-run of an existing successful project (creates a new linked child project row)
+ */
+export const useCreateHardenJob = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHardenJob>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createHardenJob>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getCreateHardenJobMutationOptions(options));
+    }
+
+export const getStreamHardenJobUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/harden-stream`
+}
+
+/**
+ * @summary Server-sent events stream of a hardening job's progress (id refers to the child project created by POST /projects/{id}/harden)
+ */
+export const streamHardenJob = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getStreamHardenJobUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getStreamHardenJobQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/harden-stream`
+    ] as const;
+    }
+
+
+export const getStreamHardenJobQueryOptions = <TData = Awaited<ReturnType<typeof streamHardenJob>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof streamHardenJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStreamHardenJobQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof streamHardenJob>>> = ({ signal }) => streamHardenJob(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof streamHardenJob>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type StreamHardenJobQueryResult = NonNullable<Awaited<ReturnType<typeof streamHardenJob>>>
+export type StreamHardenJobQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Server-sent events stream of a hardening job's progress (id refers to the child project created by POST /projects/{id}/harden)
+ */
+
+export function useStreamHardenJob<TData = Awaited<ReturnType<typeof streamHardenJob>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof streamHardenJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getStreamHardenJobQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+

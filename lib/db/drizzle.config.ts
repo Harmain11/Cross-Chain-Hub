@@ -11,4 +11,8 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL,
   },
+  // user_sessions is created/managed by connect-pg-simple at runtime, not by
+  // drizzle's schema — exclude it so `drizzle-kit push` never proposes
+  // dropping it (it holds live login sessions).
+  tablesFilter: ["!user_sessions"],
 });

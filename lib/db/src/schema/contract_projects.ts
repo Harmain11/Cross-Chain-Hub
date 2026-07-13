@@ -17,6 +17,7 @@ export const contractProjectsTable = pgTable("contract_projects", {
   prompt: text("prompt").notNull(),
   contractName: text("contract_name").notNull(),
   ecosystem: text("ecosystem").notNull(), // "EVM" | "SOLANA"
+  parentProjectId: integer("parent_project_id"), // set when this row is a manual "Improve Security" re-run of another project
   status: text("status").notNull().default("pending"), // pending|generating|compiling|healing|hardening|success|failed
   smartContractCode: text("smart_contract_code"),
   compiledBytecode: text("compiled_bytecode"),
