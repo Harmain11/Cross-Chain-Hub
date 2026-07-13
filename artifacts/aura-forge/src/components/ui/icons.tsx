@@ -1,0 +1,13 @@
+import * as React from "react"
+import { Terminal, Shield, Zap, Circle, Search, ArrowRight, Loader2, Play } from "lucide-react"
+
+export const Icons = {
+  Terminal,
+  Shield,
+  Zap,
+  Circle,
+  Search,
+  ArrowRight,
+  Loader2,
+  Play
+}

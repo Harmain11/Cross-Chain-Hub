@@ -1,0 +1,49 @@
+import {
+  pgTable,
+  serial,
+  integer,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod/v4";
+import { usersTable } from "./users";
+
+export const contractProjectsTable = pgTable("contract_projects", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => usersTable.id, { onDelete: "cascade" }),
+  prompt: text("prompt").notNull(),
+  contractName: text("contract_name").notNull(),
+  ecosystem: text("ecosystem").notNull(), // "EVM" | "SOLANA"
+  status: text("status").notNull().default("pending"), // pending|generating|compiling|healing|success|failed
+  smartContractCode: text("smart_contract_code"),
+  compiledBytecode: text("compiled_bytecode"),
+  abiOrIdl: text("abi_or_idl"), // JSON-serialized string
+  securityScore: integer("security_score"),
+  securityNotes: text("security_notes"),
+  compileLog: text("compile_log"),
+  networkSelected: text("network_selected"),
+  deploymentTxHash: text("deployment_tx_hash"),
+  liveDeployedAddress: text("live_deployed_address"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+export const insertContractProjectSchema = createInsertSchema(
+  contractProjectsTable,
+).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertContractProject = z.infer<
+  typeof insertContractProjectSchema
+>;
+export type ContractProjectRow = typeof contractProjectsTable.$inferSelect;

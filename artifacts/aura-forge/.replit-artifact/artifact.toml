@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "AURA Forge"
+version = "1.0.0"
+id = "artifacts/aura-forge"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19365
+
+[services.development]
+run = "pnpm --filter @workspace/aura-forge run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/aura-forge", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/aura-forge/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19365"
+BASE_PATH = "/"
