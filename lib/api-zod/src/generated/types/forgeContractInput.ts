@@ -13,4 +13,10 @@ export interface ForgeContractInput {
   /** @minLength 1 */
   contractName: string;
   ecosystem: Ecosystem;
+  /** Built-in starter template id (see the template catalog), or omit for a blank prompt. */
+  templateId?: string;
+  /** EVM only — generate an upgradeable (proxy/UUPS) contract pattern. */
+  upgradeable?: boolean;
+  /** Create this project under a team workspace instead of the caller's personal account. Caller must be a member of the team. */
+  teamId?: number;
 }

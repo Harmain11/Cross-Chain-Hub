@@ -52,6 +52,12 @@ export interface ForgeContractInput {
   /** @minLength 1 */
   contractName: string;
   ecosystem: Ecosystem;
+  /** Built-in starter template id (see the template catalog), or omit for a blank prompt. */
+  templateId?: string;
+  /** EVM only — generate an upgradeable (proxy/UUPS) contract pattern. */
+  upgradeable?: boolean;
+  /** Create this project under a team workspace instead of the caller's personal account. Caller must be a member of the team. */
+  teamId?: number;
 }
 
 export interface DeploymentInput {
@@ -60,11 +66,125 @@ export interface DeploymentInput {
   liveDeployedAddress: string;
 }
 
+export interface CreateApiKeyInput {
+  /** @minLength 1 */
+  label: string;
+}
+
+export interface ApiKeySummary {
+  id: number;
+  label: string;
+  keyPrefix: string;
+  createdAt: string;
+  /** @nullable */
+  lastUsedAt: string | null;
+  /** @nullable */
+  revokedAt: string | null;
+}
+
+export interface CreateApiKeyResult {
+  id: number;
+  label: string;
+  keyPrefix: string;
+  /** The full secret key — shown only in this response, never again. */
+  fullKey: string;
+  createdAt: string;
+}
+
+export interface CreateTeamInput {
+  /** @minLength 1 */
+  name: string;
+}
+
+export type TeamMembershipSummaryRole = typeof TeamMembershipSummaryRole[keyof typeof TeamMembershipSummaryRole];
+
+
+export const TeamMembershipSummaryRole = {
+  owner: 'owner',
+  member: 'member',
+} as const;
+
+export interface TeamMembershipSummary {
+  id: number;
+  name: string;
+  role: TeamMembershipSummaryRole;
+  createdAt: string;
+}
+
+export type TeamMemberRole = typeof TeamMemberRole[keyof typeof TeamMemberRole];
+
+
+export const TeamMemberRole = {
+  owner: 'owner',
+  member: 'member',
+} as const;
+
+export interface TeamMember {
+  userId: number;
+  email: string;
+  role: TeamMemberRole;
+}
+
+export type CreateTeamInviteInputRole = typeof CreateTeamInviteInputRole[keyof typeof CreateTeamInviteInputRole];
+
+
+export const CreateTeamInviteInputRole = {
+  owner: 'owner',
+  member: 'member',
+} as const;
+
+export interface CreateTeamInviteInput {
+  email: string;
+  role?: CreateTeamInviteInputRole;
+}
+
+export type TeamInviteRole = typeof TeamInviteRole[keyof typeof TeamInviteRole];
+
+
+export const TeamInviteRole = {
+  owner: 'owner',
+  member: 'member',
+} as const;
+
+export type TeamInviteStatus = typeof TeamInviteStatus[keyof typeof TeamInviteStatus];
+
+
+export const TeamInviteStatus = {
+  pending: 'pending',
+  accepted: 'accepted',
+  declined: 'declined',
+} as const;
+
+export interface TeamInvite {
+  id: number;
+  teamId: number;
+  teamName: string;
+  email: string;
+  role: TeamInviteRole;
+  status: TeamInviteStatus;
+  createdAt: string;
+}
+
+export interface MonitoringConfigInput {
+  enabled: boolean;
+  /**
+     * Webhook URL to POST alerts to; required when enabling monitoring with webhook delivery.
+     * @nullable
+     */
+  webhookUrl?: string | null;
+  emailAlertsEnabled?: boolean;
+}
+
 export interface ContractProjectSummary {
   id: number;
+  /** @nullable */
+  teamId: number | null;
   contractName: string;
   ecosystem: Ecosystem;
   status: ForgeStatus;
+  /** @nullable */
+  templateId: string | null;
+  upgradeable: boolean;
   /** @nullable */
   securityScore: number | null;
   /**
@@ -89,10 +209,18 @@ export interface HardenJobInput {
 export interface ContractProject {
   id: number;
   userId: number;
+  /**
+     * Set when this project belongs to a team workspace instead of the creator's personal account.
+     * @nullable
+     */
+  teamId: number | null;
   prompt: string;
   contractName: string;
   ecosystem: Ecosystem;
   status: ForgeStatus;
+  /** @nullable */
+  templateId: string | null;
+  upgradeable: boolean;
   /**
      * Set when this project is an "Improve Security" re-run of another project
      * @nullable
@@ -121,6 +249,21 @@ export interface ContractProject {
      * @nullable
      */
   userContext: string | null;
+  /**
+     * Auto-generated test suite source matching the latest contract version (Foundry-style for EVM, Anchor/TS for Solana), or null if generation hasn't run or failed.
+     * @nullable
+     */
+  testSuiteCode: string | null;
+  /**
+     * JSON-serialized array of {functionSignature, gas} from solc (EVM only). Null for Solana or if unavailable.
+     * @nullable
+     */
+  gasEstimates: string | null;
+  /**
+     * LLM-authored gas/efficiency notes — grounded in real solc estimates for EVM, or a clearly-labeled estimate for Solana.
+     * @nullable
+     */
+  gasNotes: string | null;
   /** @nullable */
   compileLog: string | null;
   /** @nullable */
@@ -129,6 +272,56 @@ export interface ContractProject {
   deploymentTxHash: string | null;
   /** @nullable */
   liveDeployedAddress: string | null;
+  /**
+     * EVM-only source verification status after a deploy: pending|verified|failed, or null before any deploy.
+     * @nullable
+     */
+  verificationStatus: string | null;
+  /**
+     * Link to the verified-source page once verification succeeds.
+     * @nullable
+     */
+  verificationUrl: string | null;
+  /**
+     * Human-readable reason when verification fails.
+     * @nullable
+     */
+  verificationError: string | null;
+  /** Whether post-deploy activity monitoring is turned on for this project (EVM only). */
+  monitoringEnabled: boolean;
+  /**
+     * Webhook URL to POST alerts to when new on-chain activity is detected.
+     * @nullable
+     */
+  monitoringWebhookUrl: string | null;
+  /** Whether the user has opted into email alerts in addition to (or instead of) the webhook. */
+  monitoringEmailAlertsEnabled: boolean;
+  /** @nullable */
+  monitoringLastCheckedAt: string | null;
+  /** @nullable */
+  monitoringLastAlertAt: string | null;
+  createdAt: string;
+}
+
+export interface ProjectLineageEntry {
+  id: number;
+  contractName: string;
+  status: ForgeStatus;
+  /** @nullable */
+  securityScore: number | null;
+  /** @nullable */
+  securityNotes: string | null;
+  /** @nullable */
+  securityContextQuestion: string | null;
+  /**
+     * The context the user supplied that led to this version (if this version was a context-guided hardening re-run).
+     * @nullable
+     */
+  userContext: string | null;
+  /** @nullable */
+  smartContractCode: string | null;
+  /** @nullable */
+  parentProjectId: number | null;
   createdAt: string;
 }
 
@@ -140,4 +333,18 @@ export interface ProjectsSummary {
   /** @nullable */
   averageSecurityScore: number | null;
 }
+
+export type ListProjectsParams = {
+/**
+ * Scope to a team workspace instead of the caller's personal projects. Caller must be a member.
+ */
+teamId?: number;
+};
+
+export type GetProjectsSummaryParams = {
+/**
+ * Scope to a team workspace instead of the caller's personal projects. Caller must be a member.
+ */
+teamId?: number;
+};
 

@@ -8,7 +8,35 @@ import {
   scoreContractSecurity,
   hardenSolidityContract,
   hardenAnchorContract,
+  generateTestSuite,
 } from "./llm";
+import { getTemplate, UPGRADEABLE_EVM_FRAGMENT } from "./templates";
+
+/**
+ * Generates a matching test suite for the final contract version. Test-generation
+ * failures must never fail the overall forge/harden pipeline — they are caught and
+ * reported via `emit`, leaving testSuiteCode null.
+ */
+async function generateTestSuiteSafe(
+  code: string,
+  contractName: string,
+  ecosystem: "EVM" | "SOLANA",
+  idl: string | undefined,
+  emit: (event: any) => void,
+): Promise<string | null> {
+  try {
+    emit({ phase: "testing", message: "Generating test suite..." });
+    const tests = await generateTestSuite(code, contractName, ecosystem, idl);
+    emit({ phase: "testing", message: "Test suite generated." });
+    return tests;
+  } catch (err) {
+    emit({
+      phase: "testing",
+      message: `Test suite generation did not complete: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    return null;
+  }
+}
 
 export type ForgeEvent =
   | { phase: string; message: string }
@@ -93,7 +121,13 @@ async function runEvmPipeline(
   await setStatus(project.id, "generating");
   emit({ phase: "generating", message: "Generating Solidity contract..." });
 
-  const initialCode = await generateSolidityContract(project.prompt, project.contractName);
+  const template = getTemplate("EVM", project.templateId);
+  const initialCode = await generateSolidityContract(
+    project.prompt,
+    project.contractName,
+    template?.promptFragment,
+    project.upgradeable ? UPGRADEABLE_EVM_FRAGMENT : undefined,
+  );
   const compileLog: string[] = [];
 
   const first = await compileWithSelfHeal(initialCode, project.contractName, emit, project.id);
@@ -119,8 +153,8 @@ async function runEvmPipeline(
   let bestResult = first.result;
 
   emit({ phase: "auditing", message: "Running LLM security audit..." });
-  let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion } =
-    await scoreContractSecurity(bestCode, "EVM");
+  let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion, gasNotes: bestGasNotes } =
+    await scoreContractSecurity(bestCode, "EVM", project.upgradeable, bestResult.gasEstimates);
   emit({
     phase: "auditing",
     message: `Security score: ${bestScore}/100. ${bestNotes}`,
@@ -160,7 +194,12 @@ async function runEvmPipeline(
     }
 
     emit({ phase: "auditing", message: "Re-auditing hardened contract..." });
-    const rescored = await scoreContractSecurity(recompiled.code, "EVM");
+    const rescored = await scoreContractSecurity(
+      recompiled.code,
+      "EVM",
+      project.upgradeable,
+      recompiled.result.gasEstimates,
+    );
     emit({
       phase: "auditing",
       message: `Security score: ${rescored.score}/100. ${rescored.notes}`,
@@ -172,6 +211,7 @@ async function runEvmPipeline(
       bestScore = rescored.score;
       bestNotes = rescored.notes;
       bestContextQuestion = rescored.contextQuestion;
+      bestGasNotes = rescored.gasNotes;
     } else {
       emit({
         phase: "hardening",
@@ -199,6 +239,8 @@ async function runEvmPipeline(
     }
   }
 
+  const testSuiteCode = await generateTestSuiteSafe(bestCode, project.contractName, "EVM", undefined, emit);
+
   const [updated] = await db
     .update(contractProjectsTable)
     .set({
@@ -210,6 +252,9 @@ async function runEvmPipeline(
       securityNotes: bestNotes,
       securityContextQuestion: bestContextQuestion,
       compileLog: compileLog.join("\n\n"),
+      testSuiteCode,
+      gasEstimates: bestResult.gasEstimates ? JSON.stringify(bestResult.gasEstimates) : null,
+      gasNotes: bestGasNotes || null,
     })
     .where(eq(contractProjectsTable.id, project.id))
     .returning();
@@ -279,13 +324,15 @@ async function hardenEvmOnly(
   let bestScore = parent.securityScore ?? 0;
   let bestNotes = parent.securityNotes ?? "";
   let bestContextQuestion: string | null = null;
+  let bestGasNotes = parent.gasNotes ?? "";
 
   if (parent.securityScore === null) {
     emit({ phase: "auditing", message: "Running LLM security audit..." });
-    const scored = await scoreContractSecurity(bestCode, "EVM");
+    const scored = await scoreContractSecurity(bestCode, "EVM", parent.upgradeable, bestResult.gasEstimates);
     bestScore = scored.score;
     bestNotes = scored.notes;
     bestContextQuestion = scored.contextQuestion;
+    bestGasNotes = scored.gasNotes;
   }
 
   let hardenAttempt = 0;
@@ -319,7 +366,12 @@ async function hardenEvmOnly(
     }
 
     emit({ phase: "auditing", message: "Re-auditing hardened contract..." });
-    const rescored = await scoreContractSecurity(recompiled.code, "EVM");
+    const rescored = await scoreContractSecurity(
+      recompiled.code,
+      "EVM",
+      parent.upgradeable,
+      recompiled.result.gasEstimates,
+    );
     emit({ phase: "auditing", message: `Security score: ${rescored.score}/100. ${rescored.notes}` });
 
     if (rescored.score >= bestScore) {
@@ -328,6 +380,7 @@ async function hardenEvmOnly(
       bestScore = rescored.score;
       bestNotes = rescored.notes;
       bestContextQuestion = rescored.contextQuestion;
+      bestGasNotes = rescored.gasNotes;
     } else {
       emit({
         phase: "hardening",
@@ -355,6 +408,8 @@ async function hardenEvmOnly(
     });
   }
 
+  const testSuiteCode = await generateTestSuiteSafe(bestCode, parent.contractName, "EVM", undefined, emit);
+
   const [updated] = await db
     .update(contractProjectsTable)
     .set({
@@ -366,6 +421,9 @@ async function hardenEvmOnly(
       securityNotes: bestNotes,
       securityContextQuestion: bestContextQuestion,
       compileLog: compileLog.join("\n\n"),
+      testSuiteCode,
+      gasEstimates: bestResult.gasEstimates ? JSON.stringify(bestResult.gasEstimates) : null,
+      gasNotes: bestGasNotes || null,
     })
     .where(eq(contractProjectsTable.id, child.id))
     .returning();
@@ -388,6 +446,7 @@ async function hardenSolanaOnly(
   let bestScore = parent.securityScore ?? 0;
   let bestNotes = parent.securityNotes ?? "";
   let bestContextQuestion: string | null = null;
+  let bestGasNotes = parent.gasNotes ?? "";
 
   if (parent.securityScore === null) {
     emit({ phase: "auditing", message: "Running LLM security audit..." });
@@ -395,6 +454,7 @@ async function hardenSolanaOnly(
     bestScore = scored.score;
     bestNotes = scored.notes;
     bestContextQuestion = scored.contextQuestion;
+    bestGasNotes = scored.gasNotes;
   }
 
   let hardenAttempt = 0;
@@ -437,6 +497,7 @@ async function hardenSolanaOnly(
       bestScore = rescored.score;
       bestNotes = rescored.notes;
       bestContextQuestion = rescored.contextQuestion;
+      bestGasNotes = rescored.gasNotes;
     } else {
       emit({
         phase: "hardening",
@@ -464,6 +525,8 @@ async function hardenSolanaOnly(
     });
   }
 
+  const testSuiteCode = await generateTestSuiteSafe(bestCode, parent.contractName, "SOLANA", bestIdl, emit);
+
   const [updated] = await db
     .update(contractProjectsTable)
     .set({
@@ -475,6 +538,8 @@ async function hardenSolanaOnly(
       securityNotes: bestNotes,
       securityContextQuestion: bestContextQuestion,
       compileLog: "Simulated build: Anchor/cargo toolchain unavailable in this environment.",
+      testSuiteCode,
+      gasNotes: bestGasNotes || null,
     })
     .where(eq(contractProjectsTable.id, child.id))
     .returning();
@@ -495,7 +560,12 @@ async function runSolanaPipeline(
   let bestCode: string;
   let bestIdl: string;
   {
-    const generated = await generateAnchorContract(project.prompt, project.contractName);
+    const template = getTemplate("SOLANA", project.templateId);
+    const generated = await generateAnchorContract(
+      project.prompt,
+      project.contractName,
+      template?.promptFragment,
+    );
     bestCode = generated.code;
     bestIdl = generated.idl;
   }
@@ -512,7 +582,7 @@ async function runSolanaPipeline(
   const compileLog = "Simulated build: Anchor/cargo toolchain unavailable in this environment. Rust source and IDL were generated but not compiled to a .so binary.";
 
   emit({ phase: "auditing", message: "Running LLM security audit..." });
-  let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion } =
+  let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion, gasNotes: bestGasNotes } =
     await scoreContractSecurity(bestCode, "SOLANA");
   emit({
     phase: "auditing",
@@ -559,6 +629,7 @@ async function runSolanaPipeline(
       bestScore = rescored.score;
       bestNotes = rescored.notes;
       bestContextQuestion = rescored.contextQuestion;
+      bestGasNotes = rescored.gasNotes;
     } else {
       emit({
         phase: "hardening",
@@ -586,6 +657,8 @@ async function runSolanaPipeline(
     }
   }
 
+  const testSuiteCode = await generateTestSuiteSafe(bestCode, project.contractName, "SOLANA", bestIdl, emit);
+
   const [updated] = await db
     .update(contractProjectsTable)
     .set({
@@ -597,6 +670,8 @@ async function runSolanaPipeline(
       securityNotes: bestNotes,
       securityContextQuestion: bestContextQuestion,
       compileLog,
+      testSuiteCode,
+      gasNotes: bestGasNotes || null,
     })
     .where(eq(contractProjectsTable.id, project.id))
     .returning();

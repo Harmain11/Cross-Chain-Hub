@@ -10,9 +10,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@types/archiver": "^8.0.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/integrations-anthropic-ai": "workspace:*",
+    "archiver": "^8.0.0",
     "bcryptjs": "^3.0.2",
     "connect-pg-simple": "^10.0.0",
     "cookie-parser": "^1.4.7",

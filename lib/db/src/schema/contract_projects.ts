@@ -3,20 +3,38 @@ import {
   serial,
   integer,
   text,
+  boolean,
   timestamp,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
+import { teamsTable } from "./teams";
 
 export const contractProjectsTable = pgTable("contract_projects", {
   id: serial("id").primaryKey(),
   userId: integer("user_id")
     .notNull()
     .references(() => usersTable.id, { onDelete: "cascade" }),
+  // Set when this project was created under a team workspace instead of the
+  // creator's personal account. Null means it's a personal project.
+  teamId: integer("team_id").references(() => teamsTable.id, {
+    onDelete: "cascade",
+  }),
   prompt: text("prompt").notNull(),
   contractName: text("contract_name").notNull(),
   ecosystem: text("ecosystem").notNull(), // "EVM" | "SOLANA"
+  // Built-in starter template id (see lib/forge/templates.ts), or null for a blank prompt.
+  templateId: text("template_id"),
+  // Whether generation should use an upgradeable (proxy/UUPS) pattern. EVM only.
+  upgradeable: boolean("upgradeable").notNull().default(false),
+  // Auto-generated test suite source matching the latest contract version, or null
+  // if generation hasn't run yet or failed (failure never blocks the main pipeline).
+  testSuiteCode: text("test_suite_code"),
+  // Per-function gas estimates from solc (EVM), JSON-serialized array of {functionSignature, gas}. Null for Solana.
+  gasEstimates: text("gas_estimates"),
+  // LLM-authored gas/efficiency notes (EVM: grounded in gasEstimates; Solana: labeled estimate).
+  gasNotes: text("gas_notes"),
   parentProjectId: integer("parent_project_id"), // set when this row is a manual "Improve Security" re-run of another project
   status: text("status").notNull().default("pending"), // pending|generating|compiling|healing|hardening|success|failed
   smartContractCode: text("smart_contract_code"),
@@ -35,6 +53,30 @@ export const contractProjectsTable = pgTable("contract_projects", {
   networkSelected: text("network_selected"),
   deploymentTxHash: text("deployment_tx_hash"),
   liveDeployedAddress: text("live_deployed_address"),
+  // Source verification against the deployed network's explorer/registry (EVM only).
+  // null until a deploy triggers verification; "pending"|"verified"|"failed" after.
+  verificationStatus: text("verification_status"),
+  // Link to the verified-source page once verification succeeds.
+  verificationUrl: text("verification_url"),
+  // Human-readable reason when verification fails; cleared on success.
+  verificationError: text("verification_error"),
+  // Post-deploy monitoring (EVM only). When enabled, a background poller
+  // checks the deployed contract for new activity since the last-checked
+  // block and fires alerts.
+  monitoringEnabled: boolean("monitoring_enabled").notNull().default(false),
+  monitoringWebhookUrl: text("monitoring_webhook_url"),
+  monitoringEmailAlertsEnabled: boolean("monitoring_email_alerts_enabled")
+    .notNull()
+    .default(false),
+  // Last block number (as a string; can exceed JS safe-integer precision) the
+  // poller has scanned up to for this contract.
+  monitoringLastCheckedBlock: text("monitoring_last_checked_block"),
+  monitoringLastCheckedAt: timestamp("monitoring_last_checked_at", {
+    withTimezone: true,
+  }),
+  monitoringLastAlertAt: timestamp("monitoring_last_alert_at", {
+    withTimezone: true,
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

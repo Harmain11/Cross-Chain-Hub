@@ -1,9 +1,17 @@
 import solc from "solc";
 
+export interface GasEstimate {
+  functionSignature: string;
+  gas: string; // solc reports these as strings (may be "infinite" for unbounded loops)
+}
+
 export interface EvmCompileResult {
   success: boolean;
   bytecode?: string;
   abi?: unknown[];
+  gasEstimates?: GasEstimate[];
+  /** solc-generated metadata JSON (string), used for Sourcify verification. */
+  metadata?: string;
   errors?: string;
 }
 
@@ -19,7 +27,7 @@ export function compileSolidity(
     settings: {
       outputSelection: {
         "*": {
-          "*": ["abi", "evm.bytecode.object"],
+          "*": ["abi", "evm.bytecode.object", "evm.gasEstimates", "metadata"],
         },
       },
     },
@@ -57,9 +65,20 @@ export function compileSolidity(
   }
 
   const compiled = fileOutput[contractKey];
+  const external: Record<string, string> | undefined =
+    compiled.evm?.gasEstimates?.external;
+  const gasEstimates: GasEstimate[] | undefined = external
+    ? Object.entries(external).map(([functionSignature, gas]) => ({
+        functionSignature,
+        gas: String(gas),
+      }))
+    : undefined;
+
   return {
     success: true,
     bytecode: `0x${compiled.evm.bytecode.object}`,
     abi: compiled.abi,
+    gasEstimates,
+    metadata: compiled.metadata,
   };
 }
