@@ -35,6 +35,8 @@ async function buildAll() {
       "canvas",
       "bcrypt",
       "argon2",
+      "connect-pg-simple",
+      "solc",
       "fsevents",
       "re2",
       "farmhash",

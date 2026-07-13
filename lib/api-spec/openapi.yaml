@@ -3,13 +3,19 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AURA Forge API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: projects
+    description: Contract project operations
+  - name: forge
+    description: AI contract generation and compilation
 paths:
   /healthz:
     get:
@@ -24,6 +30,249 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/signup:
+    post:
+      operationId: signup
+      tags: [auth]
+      summary: Create a new account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthCredentials"
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid input or email already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Log in to an existing account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthCredentials"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Log out of the current session
+      responses:
+        "204":
+          description: Logged out
+
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: Get the currently authenticated user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List the current user's forged contract projects
+      responses:
+        "200":
+          description: List of contract projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContractProjectSummary"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /projects/summary:
+    get:
+      operationId: getProjectsSummary
+      tags: [projects]
+      summary: Aggregate stats across the current user's contract projects
+      responses:
+        "200":
+          description: Aggregate summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectsSummary"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /projects/{id}:
+    get:
+      operationId: getProject
+      tags: [projects]
+      summary: Get a single contract project with full source and artifacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Contract project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractProject"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      summary: Delete a contract project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /projects/{id}/deploy:
+    patch:
+      operationId: recordDeployment
+      tags: [projects]
+      summary: Record a live testnet deployment for a contract project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeploymentInput"
+      responses:
+        "200":
+          description: Updated contract project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractProject"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /forge-contract:
+    post:
+      operationId: createForgeJob
+      tags: [forge]
+      summary: Start a new AI contract forge job (creates a pending project row)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgeContractInput"
+      responses:
+        "201":
+          description: Forge job created, pending generation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractProject"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +283,167 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    AuthCredentials:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+          minLength: 8
+
+    User:
+      type: object
+      required: [id, email, createdAt]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Ecosystem:
+      type: string
+      enum: [EVM, SOLANA]
+
+    ForgeStatus:
+      type: string
+      enum: [pending, generating, compiling, healing, success, failed]
+
+    ForgeContractInput:
+      type: object
+      required: [prompt, contractName, ecosystem]
+      properties:
+        prompt:
+          type: string
+          minLength: 3
+        contractName:
+          type: string
+          minLength: 1
+        ecosystem:
+          $ref: "#/components/schemas/Ecosystem"
+
+    DeploymentInput:
+      type: object
+      required: [networkSelected, deploymentTxHash, liveDeployedAddress]
+      properties:
+        networkSelected:
+          type: string
+        deploymentTxHash:
+          type: string
+        liveDeployedAddress:
+          type: string
+
+    ContractProjectSummary:
+      type: object
+      required:
+        - id
+        - contractName
+        - ecosystem
+        - status
+        - securityScore
+        - networkSelected
+        - deploymentTxHash
+        - liveDeployedAddress
+        - createdAt
+      properties:
+        id:
+          type: integer
+        contractName:
+          type: string
+        ecosystem:
+          $ref: "#/components/schemas/Ecosystem"
+        status:
+          $ref: "#/components/schemas/ForgeStatus"
+        securityScore:
+          type: ["integer", "null"]
+        networkSelected:
+          type: ["string", "null"]
+        deploymentTxHash:
+          type: ["string", "null"]
+        liveDeployedAddress:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    ContractProject:
+      type: object
+      required:
+        - id
+        - userId
+        - prompt
+        - contractName
+        - ecosystem
+        - status
+        - smartContractCode
+        - compiledBytecode
+        - abiOrIdl
+        - securityScore
+        - securityNotes
+        - compileLog
+        - networkSelected
+        - deploymentTxHash
+        - liveDeployedAddress
+        - createdAt
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        prompt:
+          type: string
+        contractName:
+          type: string
+        ecosystem:
+          $ref: "#/components/schemas/Ecosystem"
+        status:
+          $ref: "#/components/schemas/ForgeStatus"
+        smartContractCode:
+          type: ["string", "null"]
+        compiledBytecode:
+          type: ["string", "null"]
+        abiOrIdl:
+          type: ["string", "null"]
+          description: JSON-serialized ABI (EVM) or IDL (Solana)
+        securityScore:
+          type: ["integer", "null"]
+        securityNotes:
+          type: ["string", "null"]
+        compileLog:
+          type: ["string", "null"]
+        networkSelected:
+          type: ["string", "null"]
+        deploymentTxHash:
+          type: ["string", "null"]
+        liveDeployedAddress:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    ProjectsSummary:
+      type: object
+      required:
+        [totalProjects, evmCount, solanaCount, deployedCount, averageSecurityScore]
+      properties:
+        totalProjects:
+          type: integer
+        evmCount:
+          type: integer
+        solanaCount:
+          type: integer
+        deployedCount:
+          type: integer
+        averageSecurityScore:
+          type: ["number", "null"]
