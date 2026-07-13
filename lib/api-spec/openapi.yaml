@@ -318,7 +318,7 @@ components:
 
     ForgeStatus:
       type: string
-      enum: [pending, generating, compiling, healing, success, failed]
+      enum: [pending, generating, compiling, healing, hardening, success, failed]
 
     ForgeContractInput:
       type: object

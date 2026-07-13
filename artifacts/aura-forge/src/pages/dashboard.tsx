@@ -456,7 +456,7 @@ export default function DashboardPage() {
                 <span className={
                   log.phase === 'error' ? 'text-destructive' : 
                   log.phase === 'done' || log.phase === 'success' ? 'text-green-400' :
-                  log.phase === 'healing' ? 'text-amber-400' :
+                  log.phase === 'healing' || log.phase === 'hardening' ? 'text-amber-400' :
                   'text-[#ccc]'
                 }>{log.message}</span>
               </div>

@@ -17,7 +17,7 @@ export const contractProjectsTable = pgTable("contract_projects", {
   prompt: text("prompt").notNull(),
   contractName: text("contract_name").notNull(),
   ecosystem: text("ecosystem").notNull(), // "EVM" | "SOLANA"
-  status: text("status").notNull().default("pending"), // pending|generating|compiling|healing|success|failed
+  status: text("status").notNull().default("pending"), // pending|generating|compiling|healing|hardening|success|failed
   smartContractCode: text("smart_contract_code"),
   compiledBytecode: text("compiled_bytecode"),
   abiOrIdl: text("abi_or_idl"), // JSON-serialized string
