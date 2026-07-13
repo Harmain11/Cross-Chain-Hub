@@ -9,3 +9,5 @@
 - [New DB column breaks hand-mapped list endpoints](hand-mapped-list-endpoint-new-column.md) — adding a required field to an OpenAPI response schema 500s any route that hand-builds its response object field-by-field instead of spreading the row.
 - [drizzle-kit push vs runtime-managed tables](drizzle-push-runtime-table-exclusion.md) — `drizzle-kit push` proposes dropping tables a library creates at runtime (e.g. connect-pg-simple's session table) unless excluded via `tablesFilter`.
 - [Forge hardening context-question flow](forge-hardening-context-question.md) — when hardening stalls below target, the auditor can ask the user a specific context question instead of just retrying blindly.
+- [Orval generated schema/hook naming](orval-generated-schema-naming.md) — generated zod/react-query names follow the operationId, not the OpenAPI component schema name; grep generated files, don't guess.
+- [OpenAPI format:email vs installed zod version](openapi-format-email-zod-mismatch.md) — `format: email` generates `zod.email()` (v4 syntax); breaks codegen typecheck if repo's zod is v3. Match existing email fields' style instead.

@@ -16,6 +16,10 @@ tags:
     description: Contract project operations
   - name: forge
     description: AI contract generation and compilation
+  - name: teams
+    description: Team workspaces, membership, and invites
+  - name: api-keys
+    description: Public API keys for programmatic access
 paths:
   /healthz:
     get:
@@ -114,6 +118,13 @@ paths:
       operationId: listProjects
       tags: [projects]
       summary: List the current user's forged contract projects
+      parameters:
+        - name: teamId
+          in: query
+          required: false
+          description: Scope to a team workspace instead of the caller's personal projects. Caller must be a member.
+          schema:
+            type: integer
       responses:
         "200":
           description: List of contract projects
@@ -135,6 +146,13 @@ paths:
       operationId: getProjectsSummary
       tags: [projects]
       summary: Aggregate stats across the current user's contract projects
+      parameters:
+        - name: teamId
+          in: query
+          required: false
+          description: Scope to a team workspace instead of the caller's personal projects. Caller must be a member.
+          schema:
+            type: integer
       responses:
         "200":
           description: Aggregate summary
@@ -205,6 +223,39 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /projects/{id}/lineage:
+    get:
+      operationId: getProjectLineage
+      tags: [projects]
+      summary: Get the full version lineage (ancestors + descendants) containing this project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Version chain, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectLineageEntry"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /projects/{id}/deploy:
     patch:
       operationId: recordDeployment
@@ -229,6 +280,357 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ContractProject"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /projects/{id}/monitoring:
+    patch:
+      operationId: updateMonitoringConfig
+      tags: [projects]
+      summary: Turn post-deploy activity monitoring on/off and configure alert delivery
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MonitoringConfigInput"
+      responses:
+        "200":
+          description: Updated contract project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractProject"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /teams:
+    get:
+      operationId: listTeams
+      tags: [teams]
+      summary: List teams the current user belongs to
+      responses:
+        "200":
+          description: Teams with the caller's role on each
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TeamMembershipSummary"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createTeam
+      tags: [teams]
+      summary: Create a new team (caller becomes owner)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTeamInput"
+      responses:
+        "201":
+          description: Team created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamMembershipSummary"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /teams/{id}/members:
+    get:
+      operationId: listTeamMembers
+      tags: [teams]
+      summary: List a team's members
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Team members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TeamMember"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a member of this team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /teams/{id}/members/{userId}:
+    delete:
+      operationId: removeTeamMember
+      tags: [teams]
+      summary: Remove a member from a team (owner only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Only the team owner can remove members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /teams/{id}/invites:
+    post:
+      operationId: createTeamInvite
+      tags: [teams]
+      summary: Invite a user to a team by email (owner only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTeamInviteInput"
+      responses:
+        "201":
+          description: Invite created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamInvite"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Only the team owner can invite members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /invites:
+    get:
+      operationId: listMyInvites
+      tags: [teams]
+      summary: List pending invites addressed to the current user's email
+      responses:
+        "200":
+          description: Pending invites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TeamInvite"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /invites/{id}/accept:
+    post:
+      operationId: acceptTeamInvite
+      tags: [teams]
+      summary: Accept a pending team invite addressed to the current user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Invite accepted, membership created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamMembershipSummary"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Invite not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /invites/{id}/decline:
+    post:
+      operationId: declineTeamInvite
+      tags: [teams]
+      summary: Decline a pending team invite addressed to the current user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Invite declined
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Invite not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api-keys:
+    get:
+      operationId: listApiKeys
+      tags: [api-keys]
+      summary: List the current user's API keys (masked — full secret is never returned again)
+      responses:
+        "200":
+          description: API keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiKeySummary"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createApiKey
+      tags: [api-keys]
+      summary: Create a new API key. The full secret is returned once and never shown again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiKeyInput"
+      responses:
+        "201":
+          description: API key created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateApiKeyResult"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api-keys/{id}:
+    delete:
+      operationId: revokeApiKey
+      tags: [api-keys]
+      summary: Revoke an API key
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Revoked
         "401":
           description: Not authenticated
           content:
@@ -396,6 +798,15 @@ components:
           minLength: 1
         ecosystem:
           $ref: "#/components/schemas/Ecosystem"
+        templateId:
+          type: string
+          description: Built-in starter template id (see the template catalog), or omit for a blank prompt.
+        upgradeable:
+          type: boolean
+          description: EVM only — generate an upgradeable (proxy/UUPS) contract pattern.
+        teamId:
+          type: integer
+          description: Create this project under a team workspace instead of the caller's personal account. Caller must be a member of the team.
 
     DeploymentInput:
       type: object
@@ -408,6 +819,130 @@ components:
         liveDeployedAddress:
           type: string
 
+    CreateApiKeyInput:
+      type: object
+      required: [label]
+      properties:
+        label:
+          type: string
+          minLength: 1
+
+    ApiKeySummary:
+      type: object
+      required: [id, label, keyPrefix, createdAt, lastUsedAt, revokedAt]
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        keyPrefix:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: ["string", "null"]
+          format: date-time
+        revokedAt:
+          type: ["string", "null"]
+          format: date-time
+
+    CreateApiKeyResult:
+      type: object
+      required: [id, label, keyPrefix, fullKey, createdAt]
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        keyPrefix:
+          type: string
+        fullKey:
+          type: string
+          description: The full secret key — shown only in this response, never again.
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateTeamInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+
+    TeamMembershipSummary:
+      type: object
+      required: [id, name, role, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        role:
+          type: string
+          enum: [owner, member]
+        createdAt:
+          type: string
+          format: date-time
+
+    TeamMember:
+      type: object
+      required: [userId, email, role]
+      properties:
+        userId:
+          type: integer
+        email:
+          type: string
+        role:
+          type: string
+          enum: [owner, member]
+
+    CreateTeamInviteInput:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+        role:
+          type: string
+          enum: [owner, member]
+
+    TeamInvite:
+      type: object
+      required: [id, teamId, teamName, email, role, status, createdAt]
+      properties:
+        id:
+          type: integer
+        teamId:
+          type: integer
+        teamName:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [owner, member]
+        status:
+          type: string
+          enum: [pending, accepted, declined]
+        createdAt:
+          type: string
+          format: date-time
+
+    MonitoringConfigInput:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+        webhookUrl:
+          type: ["string", "null"]
+          description: Webhook URL to POST alerts to; required when enabling monitoring with webhook delivery.
+        emailAlertsEnabled:
+          type: boolean
+
     ContractProjectSummary:
       type: object
       required:
@@ -419,17 +954,26 @@ components:
         - networkSelected
         - deploymentTxHash
         - liveDeployedAddress
+        - teamId
         - createdAt
         - parentProjectId
+        - templateId
+        - upgradeable
       properties:
         id:
           type: integer
+        teamId:
+          type: ["integer", "null"]
         contractName:
           type: string
         ecosystem:
           $ref: "#/components/schemas/Ecosystem"
         status:
           $ref: "#/components/schemas/ForgeStatus"
+        templateId:
+          type: ["string", "null"]
+        upgradeable:
+          type: boolean
         securityScore:
           type: ["integer", "null"]
         parentProjectId:
@@ -469,16 +1013,33 @@ components:
         - securityContextQuestion
         - userContext
         - compileLog
+        - testSuiteCode
+        - gasEstimates
+        - gasNotes
         - networkSelected
         - deploymentTxHash
         - liveDeployedAddress
+        - verificationStatus
+        - verificationUrl
+        - verificationError
+        - monitoringEnabled
+        - monitoringWebhookUrl
+        - monitoringEmailAlertsEnabled
+        - monitoringLastCheckedAt
+        - monitoringLastAlertAt
+        - teamId
         - createdAt
         - parentProjectId
+        - templateId
+        - upgradeable
       properties:
         id:
           type: integer
         userId:
           type: integer
+        teamId:
+          type: ["integer", "null"]
+          description: Set when this project belongs to a team workspace instead of the creator's personal account.
         prompt:
           type: string
         contractName:
@@ -487,6 +1048,10 @@ components:
           $ref: "#/components/schemas/Ecosystem"
         status:
           $ref: "#/components/schemas/ForgeStatus"
+        templateId:
+          type: ["string", "null"]
+        upgradeable:
+          type: boolean
         parentProjectId:
           type: ["integer", "null"]
           description: Set when this project is an "Improve Security" re-run of another project
@@ -507,6 +1072,15 @@ components:
         userContext:
           type: ["string", "null"]
           description: Additional context the user supplied for this project's hardening pass.
+        testSuiteCode:
+          type: ["string", "null"]
+          description: Auto-generated test suite source matching the latest contract version (Foundry-style for EVM, Anchor/TS for Solana), or null if generation hasn't run or failed.
+        gasEstimates:
+          type: ["string", "null"]
+          description: JSON-serialized array of {functionSignature, gas} from solc (EVM only). Null for Solana or if unavailable.
+        gasNotes:
+          type: ["string", "null"]
+          description: LLM-authored gas/efficiency notes — grounded in real solc estimates for EVM, or a clearly-labeled estimate for Solana.
         compileLog:
           type: ["string", "null"]
         networkSelected:
@@ -515,6 +1089,67 @@ components:
           type: ["string", "null"]
         liveDeployedAddress:
           type: ["string", "null"]
+        verificationStatus:
+          type: ["string", "null"]
+          description: "EVM-only source verification status after a deploy: pending|verified|failed, or null before any deploy."
+        verificationUrl:
+          type: ["string", "null"]
+          description: Link to the verified-source page once verification succeeds.
+        verificationError:
+          type: ["string", "null"]
+          description: Human-readable reason when verification fails.
+        monitoringEnabled:
+          type: boolean
+          description: Whether post-deploy activity monitoring is turned on for this project (EVM only).
+        monitoringWebhookUrl:
+          type: ["string", "null"]
+          description: Webhook URL to POST alerts to when new on-chain activity is detected.
+        monitoringEmailAlertsEnabled:
+          type: boolean
+          description: Whether the user has opted into email alerts in addition to (or instead of) the webhook.
+        monitoringLastCheckedAt:
+          type: ["string", "null"]
+          format: date-time
+        monitoringLastAlertAt:
+          type: ["string", "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    ProjectLineageEntry:
+      type: object
+      required:
+        - id
+        - contractName
+        - status
+        - securityScore
+        - securityNotes
+        - securityContextQuestion
+        - userContext
+        - smartContractCode
+        - parentProjectId
+        - createdAt
+      properties:
+        id:
+          type: integer
+        contractName:
+          type: string
+        status:
+          $ref: "#/components/schemas/ForgeStatus"
+        securityScore:
+          type: ["integer", "null"]
+        securityNotes:
+          type: ["string", "null"]
+        securityContextQuestion:
+          type: ["string", "null"]
+        userContext:
+          type: ["string", "null"]
+          description: The context the user supplied that led to this version (if this version was a context-guided hardening re-run).
+        smartContractCode:
+          type: ["string", "null"]
+        parentProjectId:
+          type: ["integer", "null"]
         createdAt:
           type: string
           format: date-time

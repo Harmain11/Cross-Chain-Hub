@@ -11,10 +11,18 @@ import type { ForgeStatus } from './forgeStatus';
 export interface ContractProject {
   id: number;
   userId: number;
+  /**
+     * Set when this project belongs to a team workspace instead of the creator's personal account.
+     * @nullable
+     */
+  teamId: number | null;
   prompt: string;
   contractName: string;
   ecosystem: Ecosystem;
   status: ForgeStatus;
+  /** @nullable */
+  templateId: string | null;
+  upgradeable: boolean;
   /**
      * Set when this project is an "Improve Security" re-run of another project
      * @nullable
@@ -43,6 +51,21 @@ export interface ContractProject {
      * @nullable
      */
   userContext: string | null;
+  /**
+     * Auto-generated test suite source matching the latest contract version (Foundry-style for EVM, Anchor/TS for Solana), or null if generation hasn't run or failed.
+     * @nullable
+     */
+  testSuiteCode: string | null;
+  /**
+     * JSON-serialized array of {functionSignature, gas} from solc (EVM only). Null for Solana or if unavailable.
+     * @nullable
+     */
+  gasEstimates: string | null;
+  /**
+     * LLM-authored gas/efficiency notes — grounded in real solc estimates for EVM, or a clearly-labeled estimate for Solana.
+     * @nullable
+     */
+  gasNotes: string | null;
   /** @nullable */
   compileLog: string | null;
   /** @nullable */
@@ -51,5 +74,33 @@ export interface ContractProject {
   deploymentTxHash: string | null;
   /** @nullable */
   liveDeployedAddress: string | null;
+  /**
+     * EVM-only source verification status after a deploy: pending|verified|failed, or null before any deploy.
+     * @nullable
+     */
+  verificationStatus: string | null;
+  /**
+     * Link to the verified-source page once verification succeeds.
+     * @nullable
+     */
+  verificationUrl: string | null;
+  /**
+     * Human-readable reason when verification fails.
+     * @nullable
+     */
+  verificationError: string | null;
+  /** Whether post-deploy activity monitoring is turned on for this project (EVM only). */
+  monitoringEnabled: boolean;
+  /**
+     * Webhook URL to POST alerts to when new on-chain activity is detected.
+     * @nullable
+     */
+  monitoringWebhookUrl: string | null;
+  /** Whether the user has opted into email alerts in addition to (or instead of) the webhook. */
+  monitoringEmailAlertsEnabled: boolean;
+  /** @nullable */
+  monitoringLastCheckedAt: Date | null;
+  /** @nullable */
+  monitoringLastAlertAt: Date | null;
   createdAt: Date;
 }

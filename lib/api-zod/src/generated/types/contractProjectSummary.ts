@@ -10,9 +10,14 @@ import type { ForgeStatus } from './forgeStatus';
 
 export interface ContractProjectSummary {
   id: number;
+  /** @nullable */
+  teamId: number | null;
   contractName: string;
   ecosystem: Ecosystem;
   status: ForgeStatus;
+  /** @nullable */
+  templateId: string | null;
+  upgradeable: boolean;
   /** @nullable */
   securityScore: number | null;
   /**

@@ -3,7 +3,6 @@ import { useLocation } from "wouter"
 import { toast } from "sonner"
 import Editor from "@monaco-editor/react"
 import { createWalletClient, custom, createPublicClient, http, parseAbi } from "viem"
-import { mainnet, sepolia, baseSepolia } from "viem/chains"
 import { Connection, PublicKey, Transaction, SystemProgram, Keypair, clusterApiUrl } from "@solana/web3.js"
 
 import { 
@@ -12,24 +11,76 @@ import {
   useListProjects, 
   useGetProjectsSummary, 
   useGetProject,
+  useGetProjectLineage,
   useCreateForgeJob,
   useCreateHardenJob,
   useRecordDeployment,
+  useUpdateMonitoringConfig,
+  useListTeams,
+  useCreateTeam,
+  useListTeamMembers,
+  useCreateTeamInvite,
+  useListMyInvites,
+  useAcceptTeamInvite,
+  useDeclineTeamInvite,
+  useRemoveTeamMember,
+  useListApiKeys,
+  useCreateApiKey,
+  useRevokeApiKey,
   getGetProjectQueryKey,
   getListProjectsQueryKey,
   getGetProjectsSummaryQueryKey,
-  getGetCurrentUserQueryKey
+  getGetCurrentUserQueryKey,
+  getListTeamsQueryKey,
+  getListMyInvitesQueryKey,
+  getListTeamMembersQueryKey,
+  getListApiKeysQueryKey
 } from "@workspace/api-client-react"
 import { useQueryClient } from "@tanstack/react-query"
+import { computeLineDiff } from "@/lib/diff"
+import { EVM_NETWORKS, SOLANA_NETWORKS, getEvmNetwork, getSolanaNetwork } from "@/lib/networks"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Switch } from "@/components/ui/switch"
 import { Icons } from "@/components/ui/icons"
+
+// Starter templates offered on contract creation. Ids must match the backend
+// catalog in artifacts/api-server/src/lib/forge/templates.ts.
+const EVM_TEMPLATE_OPTIONS = [
+  { id: "erc20", label: "ERC20 Token" },
+  { id: "erc721", label: "ERC721 NFT" },
+  { id: "erc1155", label: "ERC1155 Multi-Token" },
+  { id: "staking", label: "Staking Vault" },
+  { id: "vesting", label: "Vesting Schedule" },
+  { id: "multisig", label: "Multisig Wallet" },
+  { id: "dao", label: "DAO Governor" },
+]
+const SOLANA_TEMPLATE_OPTIONS = [
+  { id: "spl-token-mint", label: "Token Mint Authority" },
+  { id: "staking", label: "Staking Vault" },
+  { id: "vesting", label: "Vesting Schedule" },
+  { id: "multisig", label: "Multisig Wallet" },
+  { id: "dao", label: "DAO Governor" },
+]
+const NO_TEMPLATE = "__blank__"
 
 type PhaseMessage = { phase: string; message: string }
 
@@ -42,8 +93,36 @@ export default function DashboardPage() {
   const createHardenJobMutation = useCreateHardenJob()
   const recordDeploymentMutation = useRecordDeployment()
 
-  const { data: projects = [] } = useListProjects({ query: { enabled: !!user }})
-  const { data: summary } = useGetProjectsSummary({ query: { enabled: !!user }})
+  // Workspace: "personal" (the caller's own projects) or a specific team's
+  // shared workspace. Switching workspaces re-scopes the project list,
+  // summary counters, and where new forge jobs get created.
+  const [activeWorkspaceTeamId, setActiveWorkspaceTeamId] = useState<number | null>(null)
+  const { data: teams = [] } = useListTeams({ query: { enabled: !!user } })
+  const { data: myInvites = [] } = useListMyInvites({ query: { enabled: !!user } })
+  const createTeamMutation = useCreateTeam()
+  const createTeamInviteMutation = useCreateTeamInvite()
+  const acceptInviteMutation = useAcceptTeamInvite()
+  const declineInviteMutation = useDeclineTeamInvite()
+  const removeMemberMutation = useRemoveTeamMember()
+  const { data: teamMembers = [] } = useListTeamMembers(activeWorkspaceTeamId as number, {
+    query: { enabled: activeWorkspaceTeamId !== null },
+  })
+  const activeTeam = teams.find(t => t.id === activeWorkspaceTeamId)
+  const [isTeamDialogOpen, setIsTeamDialogOpen] = useState(false)
+  const [newTeamName, setNewTeamName] = useState("")
+  const [inviteEmail, setInviteEmail] = useState("")
+
+  // Public API keys for programmatic access.
+  const [isApiKeysDialogOpen, setIsApiKeysDialogOpen] = useState(false)
+  const [newKeyLabel, setNewKeyLabel] = useState("")
+  const [justCreatedKey, setJustCreatedKey] = useState<string | null>(null)
+  const { data: apiKeys = [] } = useListApiKeys({ query: { enabled: !!user && isApiKeysDialogOpen } })
+  const createApiKeyMutation = useCreateApiKey()
+  const revokeApiKeyMutation = useRevokeApiKey()
+
+  const projectScopeParams = activeWorkspaceTeamId !== null ? { teamId: activeWorkspaceTeamId } : undefined
+  const { data: projects = [] } = useListProjects(projectScopeParams, { query: { enabled: !!user }})
+  const { data: summary } = useGetProjectsSummary(projectScopeParams, { query: { enabled: !!user }})
 
   // The project selected from history — its "Improve Security" re-runs open as
   // extra tabs alongside it, without leaving the history list.
@@ -51,11 +130,20 @@ export default function DashboardPage() {
   // Which tab (activeProjectId itself, or one of its hardening children) is
   // currently displayed in the editor/console/deploy panel.
   const [displayedProjectId, setDisplayedProjectId] = useState<number | null>(null)
-  const { data: activeProject, refetch: refetchActiveProject } = useGetProject(displayedProjectId as number, { query: { enabled: !!displayedProjectId }})
+  const { data: activeProject, refetch: refetchActiveProject } = useGetProject(displayedProjectId as number, {
+    query: {
+      enabled: !!displayedProjectId,
+      // Poll while verification is in flight so the ✅/❌ badge updates without a manual refresh.
+      refetchInterval: (query) => (query.state.data?.verificationStatus === "pending" ? 3000 : false),
+    },
+  })
 
   const [ecosystem, setEcosystem] = useState<"EVM" | "SOLANA">("EVM")
   const [prompt, setPrompt] = useState("")
   const [contractName, setContractName] = useState("")
+  const [templateId, setTemplateId] = useState<string>(NO_TEMPLATE)
+  const [upgradeable, setUpgradeable] = useState(false)
+  const templateOptions = ecosystem === "EVM" ? EVM_TEMPLATE_OPTIONS : SOLANA_TEMPLATE_OPTIONS
 
   // Console output and running-state are tracked per project id so each tab
   // (original job or a hardening re-run) only shows its own log.
@@ -90,6 +178,141 @@ export default function DashboardPage() {
 
   const [targetNetwork, setTargetNetwork] = useState<string>("Ethereum Sepolia")
   const [isDeploying, setIsDeploying] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [pendingMainnetNetwork, setPendingMainnetNetwork] = useState<string | null>(null)
+  const [monitoringWebhookInput, setMonitoringWebhookInput] = useState("")
+  const [monitoringEmailAlertsInput, setMonitoringEmailAlertsInput] = useState(false)
+  const updateMonitoringConfig = useUpdateMonitoringConfig()
+
+  useEffect(() => {
+    setMonitoringWebhookInput(activeProject?.monitoringWebhookUrl ?? "")
+    setMonitoringEmailAlertsInput(activeProject?.monitoringEmailAlertsEnabled ?? false)
+  }, [activeProject?.id, activeProject?.monitoringWebhookUrl, activeProject?.monitoringEmailAlertsEnabled])
+
+  const handleEnableMonitoring = async () => {
+    if (!activeProject) return
+    if (!monitoringWebhookInput.trim() && !monitoringEmailAlertsInput) {
+      toast.error("Provide a webhook URL or enable email alerts.")
+      return
+    }
+    try {
+      await updateMonitoringConfig.mutateAsync({
+        id: activeProject.id,
+        data: {
+          enabled: true,
+          webhookUrl: monitoringWebhookInput.trim() || null,
+          emailAlertsEnabled: monitoringEmailAlertsInput,
+        },
+      })
+      refetchActiveProject()
+      toast.success("Monitoring enabled.")
+    } catch {
+      toast.error("Could not enable monitoring.")
+    }
+  }
+
+  const handleDisableMonitoring = async () => {
+    if (!activeProject) return
+    try {
+      await updateMonitoringConfig.mutateAsync({ id: activeProject.id, data: { enabled: false } })
+      refetchActiveProject()
+      toast.success("Monitoring disabled.")
+    } catch {
+      toast.error("Could not disable monitoring.")
+    }
+  }
+
+  const handleSwitchWorkspace = (teamId: number | null) => {
+    setActiveWorkspaceTeamId(teamId)
+    setActiveProjectId(null)
+    setDisplayedProjectId(null)
+  }
+
+  const handleCreateTeam = async () => {
+    if (!newTeamName.trim()) return
+    try {
+      const team = await createTeamMutation.mutateAsync({ data: { name: newTeamName.trim() } })
+      queryClient.invalidateQueries({ queryKey: getListTeamsQueryKey() })
+      setNewTeamName("")
+      setIsTeamDialogOpen(false)
+      handleSwitchWorkspace(team.id)
+      toast.success(`Team "${team.name}" created.`)
+    } catch {
+      toast.error("Could not create team.")
+    }
+  }
+
+  const handleInviteMember = async () => {
+    if (!activeWorkspaceTeamId || !inviteEmail.trim()) return
+    try {
+      await createTeamInviteMutation.mutateAsync({
+        id: activeWorkspaceTeamId,
+        data: { email: inviteEmail.trim(), role: "member" },
+      })
+      setInviteEmail("")
+      toast.success(`Invite sent to ${inviteEmail.trim()}.`)
+    } catch {
+      toast.error("Could not send invite. Only the team owner can invite members.")
+    }
+  }
+
+  const handleRemoveMember = async (userId: number) => {
+    if (!activeWorkspaceTeamId) return
+    try {
+      await removeMemberMutation.mutateAsync({ id: activeWorkspaceTeamId, userId })
+      queryClient.invalidateQueries({ queryKey: getListTeamMembersQueryKey(activeWorkspaceTeamId) })
+      toast.success("Member removed.")
+    } catch {
+      toast.error("Could not remove member.")
+    }
+  }
+
+  const handleAcceptInvite = async (inviteId: number) => {
+    try {
+      const team = await acceptInviteMutation.mutateAsync({ id: inviteId })
+      queryClient.invalidateQueries({ queryKey: getListTeamsQueryKey() })
+      queryClient.invalidateQueries({ queryKey: getListMyInvitesQueryKey() })
+      toast.success(`Joined "${team.name}".`)
+    } catch {
+      toast.error("Could not accept invite.")
+    }
+  }
+
+  const handleDeclineInvite = async (inviteId: number) => {
+    try {
+      await declineInviteMutation.mutateAsync({ id: inviteId })
+      queryClient.invalidateQueries({ queryKey: getListMyInvitesQueryKey() })
+    } catch {
+      toast.error("Could not decline invite.")
+    }
+  }
+
+  const handleCreateApiKey = async () => {
+    if (!newKeyLabel.trim()) return
+    try {
+      const key = await createApiKeyMutation.mutateAsync({ data: { label: newKeyLabel.trim() } })
+      queryClient.invalidateQueries({ queryKey: getListApiKeysQueryKey() })
+      setNewKeyLabel("")
+      setJustCreatedKey(key.fullKey)
+    } catch {
+      toast.error("Could not create API key.")
+    }
+  }
+
+  const handleRevokeApiKey = async (id: number) => {
+    try {
+      await revokeApiKeyMutation.mutateAsync({ id })
+      queryClient.invalidateQueries({ queryKey: getListApiKeysQueryKey() })
+      toast.success("API key revoked.")
+    } catch {
+      toast.error("Could not revoke key.")
+    }
+  }
+  const [codeViewMode, setCodeViewMode] = useState<"code" | "tests" | "history">("code")
+  const [historyDiffIndex, setHistoryDiffIndex] = useState<number | null>(null)
+  const { data: lineage } = useGetProjectLineage(displayedProjectId as number, {
+    query: { enabled: !!displayedProjectId && codeViewMode === "history" },
+  })
 
   const consoleEndRef = useRef<HTMLDivElement>(null)
 
@@ -120,7 +343,14 @@ export default function DashboardPage() {
 
     try {
       const newJob = await createJobMutation.mutateAsync({
-        data: { prompt, contractName, ecosystem }
+        data: {
+          prompt,
+          contractName,
+          ecosystem,
+          templateId: templateId === NO_TEMPLATE ? undefined : templateId,
+          upgradeable: ecosystem === "EVM" ? upgradeable : undefined,
+          teamId: activeWorkspaceTeamId ?? undefined,
+        }
       })
 
       setRunning(newJob.id, true)
@@ -128,6 +358,7 @@ export default function DashboardPage() {
       setActiveProjectId(newJob.id)
       setDisplayedProjectId(newJob.id)
       queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() })
+      queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() })
 
       // Start SSE Stream
       const eventSource = new EventSource(`${import.meta.env.BASE_URL}api/forge-contract/${newJob.id}/stream`, { withCredentials: true })
@@ -228,6 +459,34 @@ export default function DashboardPage() {
     }
   }
 
+  const handleDownloadProject = async () => {
+    if (!activeProject || !displayedProjectId) return
+
+    setIsDownloading(true)
+    try {
+      const res = await fetch(`${import.meta.env.BASE_URL}api/projects/${displayedProjectId}/export`, {
+        credentials: "include",
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error || "Failed to export project")
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${activeProject.contractName.replace(/[^a-zA-Z0-9_-]/g, "") || "contract"}-export.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to download project")
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
   const handleDeploy = async () => {
     if (!activeProject || !displayedProjectId) return
     
@@ -251,13 +510,12 @@ export default function DashboardPage() {
 
         const [account] = await walletClient.requestAddresses()
 
-        let chain = sepolia
-        let rpcUrl = "https://sepolia.drpc.org"
-        
-        if (targetNetwork === "Base Sepolia") {
-          chain = baseSepolia
-          rpcUrl = "https://sepolia.base.org"
+        const networkConfig = getEvmNetwork(targetNetwork)
+        if (!networkConfig) {
+          throw new Error(`Unknown network: ${targetNetwork}`)
         }
+        const chain = networkConfig.chain
+        const rpcUrl = chain.rpcUrls.default.http[0]
 
         appendLog(displayedProjectId, { phase: "deploy", message: `Switching to ${chain.name}...` })
         
@@ -311,14 +569,19 @@ export default function DashboardPage() {
         if (!window.solana || !window.solana.isPhantom) {
           throw new Error("No Solana wallet found. Please install Phantom or Backpack.")
         }
+
+        const solanaNetworkConfig = getSolanaNetwork(targetNetwork)
+        if (!solanaNetworkConfig) {
+          throw new Error(`Unknown network: ${targetNetwork}`)
+        }
         
         appendLog(displayedProjectId, { phase: "deploy", message: "Requesting Solana wallet connection..." })
         const resp = await window.solana.connect()
         const pubKey = resp.publicKey
 
-        appendLog(displayedProjectId, { phase: "deploy", message: "Preparing Devnet verification broadcast..." })
+        appendLog(displayedProjectId, { phase: "deploy", message: `Preparing ${solanaNetworkConfig.label} verification broadcast...` })
         
-        const connection = new Connection(clusterApiUrl("devnet"), "confirmed")
+        const connection = new Connection(clusterApiUrl(solanaNetworkConfig.cluster), "confirmed")
         const transaction = new Transaction().add(
           SystemProgram.transfer({
             fromPubkey: pubKey,
@@ -339,12 +602,12 @@ export default function DashboardPage() {
         await connection.confirmTransaction(signature, "confirmed")
 
         const mockAddress = Keypair.generate().publicKey.toString()
-        appendLog(displayedProjectId, { phase: "deploy", message: `Simulated program ID: ${mockAddress} (Devnet Broadcast Anchor Only)` })
+        appendLog(displayedProjectId, { phase: "deploy", message: `Simulated program ID: ${mockAddress} (${solanaNetworkConfig.label} Broadcast Anchor Only)` })
 
         await recordDeploymentMutation.mutateAsync({
           id: displayedProjectId,
           data: {
-            networkSelected: "Solana Devnet",
+            networkSelected: solanaNetworkConfig.label,
             deploymentTxHash: signature,
             liveDeployedAddress: mockAddress
           }
@@ -365,11 +628,25 @@ export default function DashboardPage() {
     }
   }
 
+  const isTargetNetworkMainnet =
+    (activeProject?.ecosystem === "SOLANA" ? getSolanaNetwork(targetNetwork) : getEvmNetwork(targetNetwork))?.isMainnet ?? false
+
+  const handleDeployClick = () => {
+    if (isTargetNetworkMainnet) {
+      setPendingMainnetNetwork(targetNetwork)
+      return
+    }
+    handleDeploy()
+  }
+
+  const confirmMainnetDeploy = () => {
+    setPendingMainnetNetwork(null)
+    handleDeploy()
+  }
+
   if (userLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><Icons.Loader2 className="animate-spin text-primary" /></div>
 
-  const evmNetworks = ["Ethereum Sepolia", "Base Sepolia"]
-  const solanaNetworks = ["Solana Devnet"]
-  const networksToUse = activeProject?.ecosystem === "SOLANA" ? solanaNetworks : evmNetworks
+  const networksToUse = activeProject?.ecosystem === "SOLANA" ? SOLANA_NETWORKS : EVM_NETWORKS
 
   // SVG Gauge logic
   const score = activeProject?.securityScore
@@ -407,6 +684,156 @@ export default function DashboardPage() {
           </Button>
         </div>
 
+        {myInvites.length > 0 && (
+          <div className="px-4 py-2 border-b border-border bg-amber-500/10">
+            {myInvites.map(invite => (
+              <div key={invite.id} className="flex items-center justify-between gap-2 text-[10px] font-mono py-0.5">
+                <span className="text-amber-300 truncate">Invited to "{invite.teamName}"</span>
+                <div className="flex gap-1 shrink-0">
+                  <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={() => handleAcceptInvite(invite.id)}>Accept</Button>
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => handleDeclineInvite(invite.id)}>Decline</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="px-4 py-2 border-b border-border bg-black/20 flex items-center gap-2">
+          <Select
+            value={activeWorkspaceTeamId === null ? "personal" : String(activeWorkspaceTeamId)}
+            onValueChange={(v) => handleSwitchWorkspace(v === "personal" ? null : Number(v))}
+          >
+            <SelectTrigger className="h-8 text-xs font-mono bg-background/50 flex-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="personal" className="text-xs font-mono">Personal Workspace</SelectItem>
+              {teams.length > 0 && <SelectSeparator />}
+              {teams.map(t => (
+                <SelectItem key={t.id} value={String(t.id)} className="text-xs font-mono">{t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" title="Create team">
+                <Icons.Users className="w-4 h-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="font-mono">
+              <DialogHeader>
+                <DialogTitle className="text-sm">New Team Workspace</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 py-2">
+                <Input
+                  placeholder="Team name"
+                  value={newTeamName}
+                  onChange={e => setNewTeamName(e.target.value)}
+                  className="text-xs"
+                />
+                <Button className="w-full" onClick={handleCreateTeam} disabled={!newTeamName.trim() || createTeamMutation.isPending}>
+                  Create
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={isApiKeysDialogOpen} onOpenChange={(open) => { setIsApiKeysDialogOpen(open); if (!open) setJustCreatedKey(null) }}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" title="API keys">
+                <Icons.Key className="w-4 h-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="font-mono max-w-md">
+              <DialogHeader>
+                <DialogTitle className="text-sm">Public API Keys</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 py-2">
+                <p className="text-[10px] text-muted-foreground">
+                  Use a key with <code className="text-primary">Authorization: Bearer &lt;key&gt;</code> to call the AURA Forge API programmatically. Example:
+                </p>
+                <pre className="text-[9px] bg-black/50 p-2 rounded border border-border overflow-x-auto">{`curl -H "Authorization: Bearer af_live_..." \\\n  ${import.meta.env.BASE_URL}api/projects`}</pre>
+
+                {justCreatedKey && (
+                  <div className="p-2 rounded border border-emerald-500/30 bg-emerald-500/10 space-y-1">
+                    <span className="text-[10px] text-emerald-400 uppercase tracking-wider">Copy this now — it won't be shown again</span>
+                    <div className="flex items-center gap-1">
+                      <code className="text-[10px] flex-1 break-all select-all">{justCreatedKey}</code>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(justCreatedKey); toast.success("Copied.") }}
+                        className="text-muted-foreground hover:text-primary shrink-0"
+                      >
+                        <Icons.Copy className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {apiKeys.map(k => (
+                    <div key={k.id} className="flex items-center justify-between text-[10px] py-1 border-b border-border/50">
+                      <div className="flex flex-col">
+                        <span className="text-foreground">{k.label}</span>
+                        <span className="text-muted-foreground">{k.keyPrefix}••••{k.revokedAt ? " · revoked" : k.lastUsedAt ? ` · used ${new Date(k.lastUsedAt).toLocaleDateString()}` : " · never used"}</span>
+                      </div>
+                      {!k.revokedAt && (
+                        <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive" onClick={() => handleRevokeApiKey(k.id)}>
+                          Revoke
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  {apiKeys.length === 0 && <span className="text-[10px] text-muted-foreground">No API keys yet.</span>}
+                </div>
+
+                <div className="flex gap-1">
+                  <Input
+                    placeholder="Key label (e.g. CI pipeline)"
+                    value={newKeyLabel}
+                    onChange={e => setNewKeyLabel(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                  <Button size="sm" className="h-8 text-xs shrink-0" onClick={handleCreateApiKey} disabled={!newKeyLabel.trim() || createApiKeyMutation.isPending}>
+                    Create
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {activeTeam && (
+          <div className="px-4 py-3 border-b border-border bg-black/20">
+            <div className="flex justify-between items-center text-[10px] font-mono text-muted-foreground uppercase mb-2 tracking-wider">
+              <span>Team Members ({teamMembers.length})</span>
+            </div>
+            <div className="space-y-1 max-h-24 overflow-y-auto">
+              {teamMembers.map(m => (
+                <div key={m.userId} className="flex items-center justify-between text-[10px] font-mono text-foreground/80">
+                  <span className="truncate">{m.email} {m.role === "owner" && <span className="text-primary">(owner)</span>}</span>
+                  {activeTeam.role === "owner" && m.role !== "owner" && (
+                    <button onClick={() => handleRemoveMember(m.userId)} className="text-muted-foreground hover:text-destructive shrink-0 ml-2">
+                      <Icons.X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {activeTeam.role === "owner" && (
+              <div className="flex gap-1 mt-2">
+                <Input
+                  placeholder="Invite by email"
+                  value={inviteEmail}
+                  onChange={e => setInviteEmail(e.target.value)}
+                  className="h-7 text-[10px]"
+                />
+                <Button size="sm" className="h-7 text-[10px]" onClick={handleInviteMember} disabled={!inviteEmail.trim() || createTeamInviteMutation.isPending}>
+                  Invite
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex-1 flex flex-col min-h-0">
           <div className="px-4 py-3 border-b border-border bg-black/20">
             <div className="flex justify-between items-center text-[10px] font-mono text-muted-foreground uppercase mb-2 tracking-wider">
@@ -432,6 +859,26 @@ export default function DashboardPage() {
 
           <div className="px-4 py-4 border-b border-border bg-black/20">
             <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Starter Template</Label>
+                <Select value={templateId} onValueChange={setTemplateId} disabled={isForging}>
+                  <SelectTrigger className="h-8 text-xs font-mono bg-background/50">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_TEMPLATE} className="text-xs font-mono">Blank prompt</SelectItem>
+                    {templateOptions.map(t => (
+                      <SelectItem key={t.id} value={t.id} className="text-xs font-mono">{t.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {ecosystem === "EVM" && (
+                <div className="flex items-center justify-between py-1">
+                  <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Upgradeable (Proxy/UUPS)</Label>
+                  <Switch checked={upgradeable} onCheckedChange={setUpgradeable} disabled={isForging} />
+                </div>
+              )}
               <div className="space-y-1">
                 <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Contract Name</Label>
                 <Input 
@@ -525,15 +972,107 @@ export default function DashboardPage() {
           </div>
         )}
         <div className="flex-1 relative border-b border-border group">
-          <div className="absolute top-0 left-0 right-0 h-10 bg-gradient-to-b from-black/80 to-transparent z-10 pointer-events-none flex items-center px-4">
-            <span className="text-xs font-mono text-muted-foreground opacity-50 uppercase tracking-widest">{activeProject ? `${activeProject.contractName}.${activeProject.ecosystem === "EVM" ? "sol" : "rs"}` : "IDLE"}</span>
+          <div className="absolute top-0 left-0 right-0 h-10 bg-gradient-to-b from-black/80 to-transparent z-10 pointer-events-none flex items-center justify-between px-4">
+            <span className="text-xs font-mono text-muted-foreground opacity-50 uppercase tracking-widest">
+              {activeProject
+                ? codeViewMode === "code"
+                  ? `${activeProject.contractName}.${activeProject.ecosystem === "EVM" ? "sol" : "rs"}`
+                  : codeViewMode === "tests"
+                  ? `${activeProject.contractName}.test.${activeProject.ecosystem === "EVM" ? "sol" : "ts"}`
+                  : "Version History"
+                : "IDLE"}
+            </span>
+            {activeProject && (
+              <div className="flex gap-1 pointer-events-auto">
+                <button
+                  onClick={() => setCodeViewMode("code")}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border ${codeViewMode === "code" ? "border-primary/50 text-primary bg-primary/10" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                >
+                  Code
+                </button>
+                <button
+                  onClick={() => setCodeViewMode("tests")}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border ${codeViewMode === "tests" ? "border-primary/50 text-primary bg-primary/10" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                >
+                  Tests
+                </button>
+                <button
+                  onClick={() => { setCodeViewMode("history"); setHistoryDiffIndex(null) }}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border ${codeViewMode === "history" ? "border-primary/50 text-primary bg-primary/10" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                >
+                  History
+                </button>
+              </div>
+            )}
           </div>
-          {activeProject ? (
+          {activeProject && codeViewMode === "history" ? (
+            <ScrollArea className="h-full pt-10">
+              <div className="p-4 space-y-2">
+                {!lineage && (
+                  <p className="text-xs font-mono text-muted-foreground p-2">Loading version history...</p>
+                )}
+                {lineage?.map((entry, idx) => {
+                  const isLatest = idx === lineage.length - 1
+                  const isDiffing = historyDiffIndex === idx
+                  const prev = idx > 0 ? lineage[idx - 1] : null
+                  return (
+                    <div key={entry.id} className="border border-white/10 rounded overflow-hidden">
+                      <button
+                        onClick={() => setHistoryDiffIndex(isDiffing ? null : idx)}
+                        disabled={!prev}
+                        className="w-full flex items-center justify-between px-3 py-2 bg-card/40 hover:bg-card/70 text-left disabled:cursor-default"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-[11px] font-mono text-muted-foreground shrink-0">v{idx + 1}</span>
+                          <span className="text-[11px] font-mono text-[#ccc] truncate">
+                            {entry.userContext ? `"${entry.userContext}"` : entry.parentProjectId === null ? "Initial generation" : "Security hardening pass"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {entry.securityScore !== null && (
+                            <span className="text-[10px] font-mono text-primary/80">{entry.securityScore}/100</span>
+                          )}
+                          {isLatest && (
+                            <Badge className="text-[9px] uppercase h-5 px-1.5">Latest</Badge>
+                          )}
+                          <span className="text-[10px] font-mono text-muted-foreground">{new Date(entry.createdAt).toLocaleString()}</span>
+                          {prev && <Icons.ChevronDown className={`w-3.5 h-3.5 transition-transform ${isDiffing ? "rotate-180" : ""}`} />}
+                        </div>
+                      </button>
+                      {isDiffing && prev && (
+                        <div className="bg-[#050505] font-mono text-[11px] max-h-64 overflow-y-auto p-2">
+                          {computeLineDiff(prev.smartContractCode || "", entry.smartContractCode || "").map((line, li) => (
+                            <div
+                              key={li}
+                              className={
+                                line.type === "add"
+                                  ? "bg-green-500/10 text-green-400"
+                                  : line.type === "remove"
+                                  ? "bg-red-500/10 text-red-400"
+                                  : "text-[#888]"
+                              }
+                            >
+                              <span className="select-none mr-2 opacity-60">{line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}</span>
+                              {line.text || " "}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </ScrollArea>
+          ) : activeProject ? (
             <Editor
               height="100%"
-              language={activeProject.ecosystem === "EVM" ? "sol" : "rust"}
+              language={codeViewMode === "code" ? (activeProject.ecosystem === "EVM" ? "sol" : "rust") : (activeProject.ecosystem === "EVM" ? "sol" : "typescript")}
               theme="vs-dark"
-              value={activeProject.smartContractCode || "// Awaiting generation..."}
+              value={
+                codeViewMode === "code"
+                  ? activeProject.smartContractCode || "// Awaiting generation..."
+                  : activeProject.testSuiteCode || "// Test suite not generated yet."
+              }
               options={{
                 readOnly: true,
                 minimap: { enabled: false },
@@ -626,6 +1165,25 @@ export default function DashboardPage() {
                 </div>
               )}
 
+              {activeProject.gasNotes && (
+                <div className="mt-3 w-full bg-black/40 border border-white/5 rounded p-3 space-y-2">
+                  <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                    Gas &amp; Efficiency{activeProject.ecosystem === "SOLANA" ? " (estimated)" : ""}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground font-mono leading-relaxed">{activeProject.gasNotes}</p>
+                  {activeProject.gasEstimates && (
+                    <div className="max-h-28 overflow-y-auto space-y-0.5 pt-1 border-t border-white/5">
+                      {(JSON.parse(activeProject.gasEstimates) as { functionSignature: string; gas: string }[]).map((g) => (
+                        <div key={g.functionSignature} className="flex justify-between text-[10px] font-mono text-[#999]">
+                          <span className="truncate mr-2">{g.functionSignature}</span>
+                          <span className="text-primary/70 shrink-0">{g.gas}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {activeProject.securityContextQuestion && (
                 <div className="mt-3 w-full bg-amber-500/10 border border-amber-500/20 rounded p-3 space-y-2">
                   <p className="text-[11px] text-amber-400 font-mono leading-relaxed">
@@ -658,6 +1216,16 @@ export default function DashboardPage() {
                 {isImprovingSecurity ? <Icons.Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Icons.Shield className="w-3.5 h-3.5 mr-2" />}
                 Improve Security
               </Button>
+
+              <Button
+                onClick={() => handleDownloadProject()}
+                disabled={activeProject.status !== "success" || isForging || isDeploying || isDownloading}
+                variant="outline"
+                className="w-full h-9 mt-2 font-mono text-xs uppercase tracking-widest border-white/10 text-muted-foreground hover:bg-white/5 hover:text-foreground"
+              >
+                {isDownloading ? <Icons.Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Icons.Download className="w-3.5 h-3.5 mr-2" />}
+                Download Project
+              </Button>
             </div>
 
             <div className="flex-1 p-6 flex flex-col justify-end bg-black/10">
@@ -669,11 +1237,26 @@ export default function DashboardPage() {
                       <SelectValue placeholder="Select network" />
                     </SelectTrigger>
                     <SelectContent className="font-mono text-xs">
-                      {networksToUse.map(net => (
-                        <SelectItem key={net} value={net}>{net}</SelectItem>
-                      ))}
+                      <SelectGroup>
+                        <SelectLabel>Testnets</SelectLabel>
+                        {networksToUse.filter(net => !net.isMainnet).map(net => (
+                          <SelectItem key={net.label} value={net.label}>{net.label}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                      <SelectSeparator />
+                      <SelectGroup>
+                        <SelectLabel className="text-amber-500/80">⚠ Mainnet (real funds)</SelectLabel>
+                        {networksToUse.filter(net => net.isMainnet).map(net => (
+                          <SelectItem key={net.label} value={net.label}>{net.label}</SelectItem>
+                        ))}
+                      </SelectGroup>
                     </SelectContent>
                   </Select>
+                  {isTargetNetworkMainnet && (
+                    <p className="text-[10px] font-mono text-amber-500/80">
+                      This is a mainnet network — deploying will cost real funds.
+                    </p>
+                  )}
                 </div>
 
                 {activeProject.ecosystem === "SOLANA" && (
@@ -683,7 +1266,7 @@ export default function DashboardPage() {
                 )}
 
                 <Button 
-                  onClick={handleDeploy}
+                  onClick={handleDeployClick}
                   disabled={isDeploying || activeProject.status !== "success" || isForging}
                   className="w-full h-12 font-mono uppercase tracking-widest text-sm relative group overflow-hidden border border-primary/50"
                   variant="outline"
@@ -703,6 +1286,96 @@ export default function DashboardPage() {
                       <span className="text-[10px] text-primary/70 uppercase">Address / ID</span>
                       <span className="text-[11px] font-mono truncate text-foreground select-all">{activeProject.liveDeployedAddress}</span>
                     </div>
+
+                    {activeProject.ecosystem === "EVM" && activeProject.verificationStatus && (
+                      <div className="mt-2 flex items-center gap-2">
+                        {activeProject.verificationStatus === "verified" && (
+                          <>
+                            <span className="text-[10px] font-mono px-2 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Verified ✅</span>
+                            {activeProject.verificationUrl && (
+                              <a href={activeProject.verificationUrl} target="_blank" rel="noreferrer" className="text-[10px] font-mono text-primary hover:underline">
+                                View source ↗
+                              </a>
+                            )}
+                          </>
+                        )}
+                        {activeProject.verificationStatus === "pending" && (
+                          <span className="text-[10px] font-mono px-2 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                            <Icons.Loader2 className="w-3 h-3 animate-spin" /> Verification pending
+                          </span>
+                        )}
+                        {activeProject.verificationStatus === "failed" && (
+                          <span
+                            className="text-[10px] font-mono px-2 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20"
+                            title={activeProject.verificationError ?? undefined}
+                          >
+                            Verification failed{activeProject.verificationError ? `: ${activeProject.verificationError}` : ""}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {activeProject.ecosystem === "EVM" && (
+                      <div className="mt-3 pt-3 border-t border-border/30">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Activity Monitoring</Label>
+                          {activeProject.monitoringEnabled && (
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">On</span>
+                          )}
+                        </div>
+
+                        {activeProject.monitoringEnabled ? (
+                          <div className="mt-2 flex flex-col gap-1">
+                            <span className="text-[10px] font-mono text-muted-foreground truncate">
+                              {activeProject.monitoringWebhookUrl ? `Webhook: ${activeProject.monitoringWebhookUrl}` : "No webhook set"}
+                              {activeProject.monitoringEmailAlertsEnabled ? " · Email alerts on" : ""}
+                            </span>
+                            <span className="text-[10px] font-mono text-muted-foreground">
+                              Last checked: {activeProject.monitoringLastCheckedAt ? new Date(activeProject.monitoringLastCheckedAt).toLocaleString() : "not yet"}
+                              {" · "}
+                              Last alert: {activeProject.monitoringLastAlertAt ? new Date(activeProject.monitoringLastAlertAt).toLocaleString() : "none"}
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="mt-1 h-7 font-mono text-[10px] uppercase tracking-widest w-fit"
+                              onClick={handleDisableMonitoring}
+                              disabled={updateMonitoringConfig.isPending}
+                            >
+                              Turn off
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="mt-2 flex flex-col gap-2">
+                            <Input
+                              value={monitoringWebhookInput}
+                              onChange={(e) => setMonitoringWebhookInput(e.target.value)}
+                              placeholder="https://your-webhook-endpoint.com/hook"
+                              className="h-8 font-mono text-[11px] bg-background/50"
+                            />
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                id="monitoring-email-alerts"
+                                checked={monitoringEmailAlertsInput}
+                                onCheckedChange={(v) => setMonitoringEmailAlertsInput(v === true)}
+                              />
+                              <Label htmlFor="monitoring-email-alerts" className="text-[10px] font-mono text-muted-foreground">
+                                Email alerts (requires an email provider to be connected)
+                              </Label>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 font-mono text-[10px] uppercase tracking-widest w-fit"
+                              onClick={handleEnableMonitoring}
+                              disabled={updateMonitoringConfig.isPending}
+                            >
+                              Turn on monitoring
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -716,6 +1389,20 @@ export default function DashboardPage() {
         )}
       </div>
 
+      <AlertDialog open={pendingMainnetNetwork !== null} onOpenChange={(open) => { if (!open) setPendingMainnetNetwork(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deploy to {pendingMainnetNetwork}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This is a mainnet network. Broadcasting this deployment will cost real funds and cannot be undone. Make sure you've reviewed the contract and are ready to deploy for real.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmMainnetDeploy}>Deploy to Mainnet</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

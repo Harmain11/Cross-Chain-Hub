@@ -74,11 +74,18 @@ export const GetCurrentUserResponse = zod.object({
 /**
  * @summary List the current user's forged contract projects
  */
+export const ListProjectsQueryParams = zod.object({
+  "teamId": zod.coerce.number().optional().describe('Scope to a team workspace instead of the caller\'s personal projects. Caller must be a member.')
+})
+
 export const ListProjectsResponseItem = zod.object({
   "id": zod.number(),
+  "teamId": zod.number().nullable(),
   "contractName": zod.string(),
   "ecosystem": zod.enum(['EVM', 'SOLANA']),
   "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "templateId": zod.string().nullable(),
+  "upgradeable": zod.boolean(),
   "securityScore": zod.number().nullable(),
   "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
   "networkSelected": zod.string().nullable(),
@@ -92,6 +99,10 @@ export const ListProjectsResponse = zod.array(ListProjectsResponseItem)
 /**
  * @summary Aggregate stats across the current user's contract projects
  */
+export const GetProjectsSummaryQueryParams = zod.object({
+  "teamId": zod.coerce.number().optional().describe('Scope to a team workspace instead of the caller\'s personal projects. Caller must be a member.')
+})
+
 export const GetProjectsSummaryResponse = zod.object({
   "totalProjects": zod.number(),
   "evmCount": zod.number(),
@@ -111,10 +122,13 @@ export const GetProjectParams = zod.object({
 export const GetProjectResponse = zod.object({
   "id": zod.number(),
   "userId": zod.number(),
+  "teamId": zod.number().nullable().describe('Set when this project belongs to a team workspace instead of the creator\'s personal account.'),
   "prompt": zod.string(),
   "contractName": zod.string(),
   "ecosystem": zod.enum(['EVM', 'SOLANA']),
   "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "templateId": zod.string().nullable(),
+  "upgradeable": zod.boolean(),
   "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
   "smartContractCode": zod.string().nullable(),
   "compiledBytecode": zod.string().nullable(),
@@ -123,10 +137,21 @@ export const GetProjectResponse = zod.object({
   "securityNotes": zod.string().nullable(),
   "securityContextQuestion": zod.string().nullable().describe('Set when the auditor determined a specific piece of business\/context info would let it improve the score further; cleared once addressed or the target score is reached.'),
   "userContext": zod.string().nullable().describe('Additional context the user supplied for this project\'s hardening pass.'),
+  "testSuiteCode": zod.string().nullable().describe('Auto-generated test suite source matching the latest contract version (Foundry-style for EVM, Anchor\/TS for Solana), or null if generation hasn\'t run or failed.'),
+  "gasEstimates": zod.string().nullable().describe('JSON-serialized array of {functionSignature, gas} from solc (EVM only). Null for Solana or if unavailable.'),
+  "gasNotes": zod.string().nullable().describe('LLM-authored gas\/efficiency notes — grounded in real solc estimates for EVM, or a clearly-labeled estimate for Solana.'),
   "compileLog": zod.string().nullable(),
   "networkSelected": zod.string().nullable(),
   "deploymentTxHash": zod.string().nullable(),
   "liveDeployedAddress": zod.string().nullable(),
+  "verificationStatus": zod.string().nullable().describe('EVM-only source verification status after a deploy: pending|verified|failed, or null before any deploy.'),
+  "verificationUrl": zod.string().nullable().describe('Link to the verified-source page once verification succeeds.'),
+  "verificationError": zod.string().nullable().describe('Human-readable reason when verification fails.'),
+  "monitoringEnabled": zod.boolean().describe('Whether post-deploy activity monitoring is turned on for this project (EVM only).'),
+  "monitoringWebhookUrl": zod.string().nullable().describe('Webhook URL to POST alerts to when new on-chain activity is detected.'),
+  "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
+  "monitoringLastCheckedAt": zod.coerce.date().nullable(),
+  "monitoringLastAlertAt": zod.coerce.date().nullable(),
   "createdAt": zod.coerce.date()
 })
 
@@ -139,6 +164,28 @@ export const DeleteProjectParams = zod.object({
 })
 
 export const DeleteProjectResponse = zod.void()
+
+
+/**
+ * @summary Get the full version lineage (ancestors + descendants) containing this project
+ */
+export const GetProjectLineageParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetProjectLineageResponseItem = zod.object({
+  "id": zod.number(),
+  "contractName": zod.string(),
+  "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "securityScore": zod.number().nullable(),
+  "securityNotes": zod.string().nullable(),
+  "securityContextQuestion": zod.string().nullable(),
+  "userContext": zod.string().nullable().describe('The context the user supplied that led to this version (if this version was a context-guided hardening re-run).'),
+  "smartContractCode": zod.string().nullable(),
+  "parentProjectId": zod.number().nullable(),
+  "createdAt": zod.coerce.date()
+})
+export const GetProjectLineageResponse = zod.array(GetProjectLineageResponseItem)
 
 
 /**
@@ -157,10 +204,13 @@ export const RecordDeploymentBody = zod.object({
 export const RecordDeploymentResponse = zod.object({
   "id": zod.number(),
   "userId": zod.number(),
+  "teamId": zod.number().nullable().describe('Set when this project belongs to a team workspace instead of the creator\'s personal account.'),
   "prompt": zod.string(),
   "contractName": zod.string(),
   "ecosystem": zod.enum(['EVM', 'SOLANA']),
   "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "templateId": zod.string().nullable(),
+  "upgradeable": zod.boolean(),
   "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
   "smartContractCode": zod.string().nullable(),
   "compiledBytecode": zod.string().nullable(),
@@ -169,12 +219,235 @@ export const RecordDeploymentResponse = zod.object({
   "securityNotes": zod.string().nullable(),
   "securityContextQuestion": zod.string().nullable().describe('Set when the auditor determined a specific piece of business\/context info would let it improve the score further; cleared once addressed or the target score is reached.'),
   "userContext": zod.string().nullable().describe('Additional context the user supplied for this project\'s hardening pass.'),
+  "testSuiteCode": zod.string().nullable().describe('Auto-generated test suite source matching the latest contract version (Foundry-style for EVM, Anchor\/TS for Solana), or null if generation hasn\'t run or failed.'),
+  "gasEstimates": zod.string().nullable().describe('JSON-serialized array of {functionSignature, gas} from solc (EVM only). Null for Solana or if unavailable.'),
+  "gasNotes": zod.string().nullable().describe('LLM-authored gas\/efficiency notes — grounded in real solc estimates for EVM, or a clearly-labeled estimate for Solana.'),
   "compileLog": zod.string().nullable(),
   "networkSelected": zod.string().nullable(),
   "deploymentTxHash": zod.string().nullable(),
   "liveDeployedAddress": zod.string().nullable(),
+  "verificationStatus": zod.string().nullable().describe('EVM-only source verification status after a deploy: pending|verified|failed, or null before any deploy.'),
+  "verificationUrl": zod.string().nullable().describe('Link to the verified-source page once verification succeeds.'),
+  "verificationError": zod.string().nullable().describe('Human-readable reason when verification fails.'),
+  "monitoringEnabled": zod.boolean().describe('Whether post-deploy activity monitoring is turned on for this project (EVM only).'),
+  "monitoringWebhookUrl": zod.string().nullable().describe('Webhook URL to POST alerts to when new on-chain activity is detected.'),
+  "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
+  "monitoringLastCheckedAt": zod.coerce.date().nullable(),
+  "monitoringLastAlertAt": zod.coerce.date().nullable(),
   "createdAt": zod.coerce.date()
 })
+
+
+/**
+ * @summary Turn post-deploy activity monitoring on/off and configure alert delivery
+ */
+export const UpdateMonitoringConfigParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateMonitoringConfigBody = zod.object({
+  "enabled": zod.boolean(),
+  "webhookUrl": zod.string().nullish().describe('Webhook URL to POST alerts to; required when enabling monitoring with webhook delivery.'),
+  "emailAlertsEnabled": zod.boolean().optional()
+})
+
+export const UpdateMonitoringConfigResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.number(),
+  "teamId": zod.number().nullable().describe('Set when this project belongs to a team workspace instead of the creator\'s personal account.'),
+  "prompt": zod.string(),
+  "contractName": zod.string(),
+  "ecosystem": zod.enum(['EVM', 'SOLANA']),
+  "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "templateId": zod.string().nullable(),
+  "upgradeable": zod.boolean(),
+  "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
+  "smartContractCode": zod.string().nullable(),
+  "compiledBytecode": zod.string().nullable(),
+  "abiOrIdl": zod.string().nullable().describe('JSON-serialized ABI (EVM) or IDL (Solana)'),
+  "securityScore": zod.number().nullable(),
+  "securityNotes": zod.string().nullable(),
+  "securityContextQuestion": zod.string().nullable().describe('Set when the auditor determined a specific piece of business\/context info would let it improve the score further; cleared once addressed or the target score is reached.'),
+  "userContext": zod.string().nullable().describe('Additional context the user supplied for this project\'s hardening pass.'),
+  "testSuiteCode": zod.string().nullable().describe('Auto-generated test suite source matching the latest contract version (Foundry-style for EVM, Anchor\/TS for Solana), or null if generation hasn\'t run or failed.'),
+  "gasEstimates": zod.string().nullable().describe('JSON-serialized array of {functionSignature, gas} from solc (EVM only). Null for Solana or if unavailable.'),
+  "gasNotes": zod.string().nullable().describe('LLM-authored gas\/efficiency notes — grounded in real solc estimates for EVM, or a clearly-labeled estimate for Solana.'),
+  "compileLog": zod.string().nullable(),
+  "networkSelected": zod.string().nullable(),
+  "deploymentTxHash": zod.string().nullable(),
+  "liveDeployedAddress": zod.string().nullable(),
+  "verificationStatus": zod.string().nullable().describe('EVM-only source verification status after a deploy: pending|verified|failed, or null before any deploy.'),
+  "verificationUrl": zod.string().nullable().describe('Link to the verified-source page once verification succeeds.'),
+  "verificationError": zod.string().nullable().describe('Human-readable reason when verification fails.'),
+  "monitoringEnabled": zod.boolean().describe('Whether post-deploy activity monitoring is turned on for this project (EVM only).'),
+  "monitoringWebhookUrl": zod.string().nullable().describe('Webhook URL to POST alerts to when new on-chain activity is detected.'),
+  "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
+  "monitoringLastCheckedAt": zod.coerce.date().nullable(),
+  "monitoringLastAlertAt": zod.coerce.date().nullable(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary List teams the current user belongs to
+ */
+export const ListTeamsResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "role": zod.enum(['owner', 'member']),
+  "createdAt": zod.coerce.date()
+})
+export const ListTeamsResponse = zod.array(ListTeamsResponseItem)
+
+
+/**
+ * @summary Create a new team (caller becomes owner)
+ */
+
+
+
+export const CreateTeamBody = zod.object({
+  "name": zod.string().min(1)
+})
+
+export const CreateTeamResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "role": zod.enum(['owner', 'member']),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary List a team's members
+ */
+export const ListTeamMembersParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListTeamMembersResponseItem = zod.object({
+  "userId": zod.number(),
+  "email": zod.string(),
+  "role": zod.enum(['owner', 'member'])
+})
+export const ListTeamMembersResponse = zod.array(ListTeamMembersResponseItem)
+
+
+/**
+ * @summary Remove a member from a team (owner only)
+ */
+export const RemoveTeamMemberParams = zod.object({
+  "id": zod.coerce.number(),
+  "userId": zod.coerce.number()
+})
+
+export const RemoveTeamMemberResponse = zod.void()
+
+
+/**
+ * @summary Invite a user to a team by email (owner only)
+ */
+export const CreateTeamInviteParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const CreateTeamInviteBody = zod.object({
+  "email": zod.string(),
+  "role": zod.enum(['owner', 'member']).optional()
+})
+
+export const CreateTeamInviteResponse = zod.object({
+  "id": zod.number(),
+  "teamId": zod.number(),
+  "teamName": zod.string(),
+  "email": zod.string(),
+  "role": zod.enum(['owner', 'member']),
+  "status": zod.enum(['pending', 'accepted', 'declined']),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary List pending invites addressed to the current user's email
+ */
+export const ListMyInvitesResponseItem = zod.object({
+  "id": zod.number(),
+  "teamId": zod.number(),
+  "teamName": zod.string(),
+  "email": zod.string(),
+  "role": zod.enum(['owner', 'member']),
+  "status": zod.enum(['pending', 'accepted', 'declined']),
+  "createdAt": zod.coerce.date()
+})
+export const ListMyInvitesResponse = zod.array(ListMyInvitesResponseItem)
+
+
+/**
+ * @summary Accept a pending team invite addressed to the current user
+ */
+export const AcceptTeamInviteParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const AcceptTeamInviteResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "role": zod.enum(['owner', 'member']),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Decline a pending team invite addressed to the current user
+ */
+export const DeclineTeamInviteParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeclineTeamInviteResponse = zod.void()
+
+
+/**
+ * @summary List the current user's API keys (masked — full secret is never returned again)
+ */
+export const ListApiKeysResponseItem = zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "keyPrefix": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "lastUsedAt": zod.coerce.date().nullable(),
+  "revokedAt": zod.coerce.date().nullable()
+})
+export const ListApiKeysResponse = zod.array(ListApiKeysResponseItem)
+
+
+/**
+ * @summary Create a new API key. The full secret is returned once and never shown again.
+ */
+
+
+
+export const CreateApiKeyBody = zod.object({
+  "label": zod.string().min(1)
+})
+
+export const CreateApiKeyResponse = zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "keyPrefix": zod.string(),
+  "fullKey": zod.string().describe('The full secret key — shown only in this response, never again.'),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Revoke an API key
+ */
+export const RevokeApiKeyParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RevokeApiKeyResponse = zod.void()
 
 
 /**
@@ -188,16 +461,22 @@ export const createForgeJobBodyPromptMin = 3;
 export const CreateForgeJobBody = zod.object({
   "prompt": zod.string().min(createForgeJobBodyPromptMin),
   "contractName": zod.string().min(1),
-  "ecosystem": zod.enum(['EVM', 'SOLANA'])
+  "ecosystem": zod.enum(['EVM', 'SOLANA']),
+  "templateId": zod.string().optional().describe('Built-in starter template id (see the template catalog), or omit for a blank prompt.'),
+  "upgradeable": zod.boolean().optional().describe('EVM only — generate an upgradeable (proxy\/UUPS) contract pattern.'),
+  "teamId": zod.number().optional().describe('Create this project under a team workspace instead of the caller\'s personal account. Caller must be a member of the team.')
 })
 
 export const CreateForgeJobResponse = zod.object({
   "id": zod.number(),
   "userId": zod.number(),
+  "teamId": zod.number().nullable().describe('Set when this project belongs to a team workspace instead of the creator\'s personal account.'),
   "prompt": zod.string(),
   "contractName": zod.string(),
   "ecosystem": zod.enum(['EVM', 'SOLANA']),
   "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "templateId": zod.string().nullable(),
+  "upgradeable": zod.boolean(),
   "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
   "smartContractCode": zod.string().nullable(),
   "compiledBytecode": zod.string().nullable(),
@@ -206,10 +485,21 @@ export const CreateForgeJobResponse = zod.object({
   "securityNotes": zod.string().nullable(),
   "securityContextQuestion": zod.string().nullable().describe('Set when the auditor determined a specific piece of business\/context info would let it improve the score further; cleared once addressed or the target score is reached.'),
   "userContext": zod.string().nullable().describe('Additional context the user supplied for this project\'s hardening pass.'),
+  "testSuiteCode": zod.string().nullable().describe('Auto-generated test suite source matching the latest contract version (Foundry-style for EVM, Anchor\/TS for Solana), or null if generation hasn\'t run or failed.'),
+  "gasEstimates": zod.string().nullable().describe('JSON-serialized array of {functionSignature, gas} from solc (EVM only). Null for Solana or if unavailable.'),
+  "gasNotes": zod.string().nullable().describe('LLM-authored gas\/efficiency notes — grounded in real solc estimates for EVM, or a clearly-labeled estimate for Solana.'),
   "compileLog": zod.string().nullable(),
   "networkSelected": zod.string().nullable(),
   "deploymentTxHash": zod.string().nullable(),
   "liveDeployedAddress": zod.string().nullable(),
+  "verificationStatus": zod.string().nullable().describe('EVM-only source verification status after a deploy: pending|verified|failed, or null before any deploy.'),
+  "verificationUrl": zod.string().nullable().describe('Link to the verified-source page once verification succeeds.'),
+  "verificationError": zod.string().nullable().describe('Human-readable reason when verification fails.'),
+  "monitoringEnabled": zod.boolean().describe('Whether post-deploy activity monitoring is turned on for this project (EVM only).'),
+  "monitoringWebhookUrl": zod.string().nullable().describe('Webhook URL to POST alerts to when new on-chain activity is detected.'),
+  "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
+  "monitoringLastCheckedAt": zod.coerce.date().nullable(),
+  "monitoringLastAlertAt": zod.coerce.date().nullable(),
   "createdAt": zod.coerce.date()
 })
 
@@ -228,10 +518,13 @@ export const CreateHardenJobBody = zod.object({
 export const CreateHardenJobResponse = zod.object({
   "id": zod.number(),
   "userId": zod.number(),
+  "teamId": zod.number().nullable().describe('Set when this project belongs to a team workspace instead of the creator\'s personal account.'),
   "prompt": zod.string(),
   "contractName": zod.string(),
   "ecosystem": zod.enum(['EVM', 'SOLANA']),
   "status": zod.enum(['pending', 'generating', 'compiling', 'healing', 'hardening', 'success', 'failed']),
+  "templateId": zod.string().nullable(),
+  "upgradeable": zod.boolean(),
   "parentProjectId": zod.number().nullable().describe('Set when this project is an \"Improve Security\" re-run of another project'),
   "smartContractCode": zod.string().nullable(),
   "compiledBytecode": zod.string().nullable(),
@@ -240,10 +533,21 @@ export const CreateHardenJobResponse = zod.object({
   "securityNotes": zod.string().nullable(),
   "securityContextQuestion": zod.string().nullable().describe('Set when the auditor determined a specific piece of business\/context info would let it improve the score further; cleared once addressed or the target score is reached.'),
   "userContext": zod.string().nullable().describe('Additional context the user supplied for this project\'s hardening pass.'),
+  "testSuiteCode": zod.string().nullable().describe('Auto-generated test suite source matching the latest contract version (Foundry-style for EVM, Anchor\/TS for Solana), or null if generation hasn\'t run or failed.'),
+  "gasEstimates": zod.string().nullable().describe('JSON-serialized array of {functionSignature, gas} from solc (EVM only). Null for Solana or if unavailable.'),
+  "gasNotes": zod.string().nullable().describe('LLM-authored gas\/efficiency notes — grounded in real solc estimates for EVM, or a clearly-labeled estimate for Solana.'),
   "compileLog": zod.string().nullable(),
   "networkSelected": zod.string().nullable(),
   "deploymentTxHash": zod.string().nullable(),
   "liveDeployedAddress": zod.string().nullable(),
+  "verificationStatus": zod.string().nullable().describe('EVM-only source verification status after a deploy: pending|verified|failed, or null before any deploy.'),
+  "verificationUrl": zod.string().nullable().describe('Link to the verified-source page once verification succeeds.'),
+  "verificationError": zod.string().nullable().describe('Human-readable reason when verification fails.'),
+  "monitoringEnabled": zod.boolean().describe('Whether post-deploy activity monitoring is turned on for this project (EVM only).'),
+  "monitoringWebhookUrl": zod.string().nullable().describe('Webhook URL to POST alerts to when new on-chain activity is detected.'),
+  "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
+  "monitoringLastCheckedAt": zod.coerce.date().nullable(),
+  "monitoringLastAlertAt": zod.coerce.date().nullable(),
   "createdAt": zod.coerce.date()
 })
 
