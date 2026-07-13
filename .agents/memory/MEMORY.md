@@ -11,3 +11,4 @@
 - [Forge hardening context-question flow](forge-hardening-context-question.md) — when hardening stalls below target, the auditor can ask the user a specific context question instead of just retrying blindly.
 - [Orval generated schema/hook naming](orval-generated-schema-naming.md) — generated zod/react-query names follow the operationId, not the OpenAPI component schema name; grep generated files, don't guess.
 - [OpenAPI format:email vs installed zod version](openapi-format-email-zod-mismatch.md) — `format: email` generates `zod.email()` (v4 syntax); breaks codegen typecheck if repo's zod is v3. Match existing email fields' style instead.
+- [Solana/Anchor toolchain on Replit](solana-anchor-toolchain-on-replit.md) — Nix's solana-cli/anchor-cli are too old for modern crates; use the Agave installer + a `nix-host` rustup toolchain trick to get real compiles and real IDL generation.

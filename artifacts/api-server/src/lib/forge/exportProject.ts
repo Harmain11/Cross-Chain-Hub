@@ -165,7 +165,11 @@ anchor test       # run the generated test suite
 ./scripts/deploy.sh devnet   # deploy to a cluster
 \`\`\`
 
-Note: this program was generated with a real Anchor/Rust source file and IDL, but was not compiled in the AURA Forge environment (no local Anchor toolchain there) — \`anchor build\` here is the first real compile.`
+${
+  project.compiledBytecode
+    ? "Note: this program was already compiled in the AURA Forge environment via a real cargo-build-sbf/Anchor toolchain — the compiled `.so` and IDL in this export come from that real build. Running `anchor build` here recompiles it locally."
+    : "Note: this program's source and IDL were generated but could not be compiled in the AURA Forge environment (the Anchor/cargo toolchain was unavailable there) — `anchor build` here is the first real compile."
+}`
 }
 
 ## Files

@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
 import { db, contractProjectsTable, type ContractProjectRow } from "@workspace/db";
 import { compileSolidity, type EvmCompileResult } from "./evmCompile";
+import { compileAnchorProgram, withTempBuildDir, type AnchorCompileResult } from "./solanaCompile";
 import {
   generateSolidityContract,
   repairSolidityContract,
   generateAnchorContract,
+  repairAnchorContract,
   scoreContractSecurity,
   hardenSolidityContract,
   hardenAnchorContract,
@@ -83,6 +85,58 @@ async function compileWithSelfHeal(
     log.push("Compilation succeeded.");
   } else {
     log.push(`Final attempt failed:\n${result.errors}`);
+  }
+
+  return { code, result, log };
+}
+
+/**
+ * Compiles an Anchor program to a real .so via cargo-build-sbf and generates
+ * its real IDL, self-healing compiler errors up to MAX_HEAL_ATTEMPTS times.
+ * `buildDir` is reused across attempts (and across hardening iterations by
+ * the caller) so incremental cargo compilation keeps repeat attempts fast.
+ */
+async function compileAnchorWithSelfHeal(
+  initialCode: string,
+  contractName: string,
+  buildDir: string,
+  emit: (event: ForgeEvent) => void,
+  projectId: number,
+): Promise<{ code: string; result: AnchorCompileResult; log: string[] }> {
+  const log: string[] = [];
+  let code = initialCode;
+
+  await setStatus(projectId, "compiling");
+  emit({ phase: "compiling", message: "Compiling with cargo-build-sbf (Anchor)..." });
+
+  let result = await compileAnchorProgram(code, contractName, buildDir);
+
+  if (result.toolchainUnavailable) {
+    log.push(result.log);
+    return { code, result, log };
+  }
+
+  let attempt = 0;
+  while (!result.success && attempt < MAX_HEAL_ATTEMPTS) {
+    attempt += 1;
+    log.push(`Attempt ${attempt} failed:\n${result.log}`);
+    await setStatus(projectId, "healing");
+    emit({
+      phase: "healing",
+      message: `Compile failed, self-healing (attempt ${attempt}/${MAX_HEAL_ATTEMPTS})...`,
+    });
+
+    code = await repairAnchorContract(code, result.log, contractName);
+
+    await setStatus(projectId, "compiling");
+    emit({ phase: "compiling", message: "Recompiling patched program with cargo-build-sbf..." });
+    result = await compileAnchorProgram(code, contractName, buildDir);
+  }
+
+  if (result.success) {
+    log.push("Compilation succeeded.");
+  } else {
+    log.push(`Final attempt failed:\n${result.log}`);
   }
 
   return { code, result, log };
@@ -447,6 +501,8 @@ async function hardenSolanaOnly(
   let bestNotes = parent.securityNotes ?? "";
   let bestContextQuestion: string | null = null;
   let bestGasNotes = parent.gasNotes ?? "";
+  let bestSo: string | null = parent.compiledBytecode ?? null;
+  let toolchainUnavailable = false;
 
   if (parent.securityScore === null) {
     emit({ phase: "auditing", message: "Running LLM security audit..." });
@@ -457,6 +513,9 @@ async function hardenSolanaOnly(
     bestGasNotes = scored.gasNotes;
   }
 
+  const compileLog: string[] = [];
+
+  await withTempBuildDir(async (buildDir) => {
   let hardenAttempt = 0;
   while (
     hardenAttempt < MAX_SECURITY_HARDENING_ATTEMPTS &&
@@ -487,6 +546,35 @@ async function hardenSolanaOnly(
       continue;
     }
 
+    let hardenedSo: string | undefined;
+    if (!toolchainUnavailable) {
+      const recompiled = await compileAnchorWithSelfHeal(
+        hardened.code,
+        parent.contractName,
+        buildDir,
+        emit,
+        child.id,
+      );
+      compileLog.push(...recompiled.log);
+      hardened.code = recompiled.code;
+      if (recompiled.result.toolchainUnavailable) {
+        toolchainUnavailable = true;
+        emit({
+          phase: "compiling",
+          message: "Anchor/cargo toolchain is unavailable in this environment; continuing without a real rebuild.",
+        });
+      } else if (recompiled.result.success) {
+        hardened.idl = recompiled.result.idl ?? hardened.idl;
+        hardenedSo = recompiled.result.soBase64;
+      } else {
+        emit({
+          phase: "hardening",
+          message: "Hardened program failed to compile even after self-healing; keeping previous best version.",
+        });
+        continue;
+      }
+    }
+
     emit({ phase: "auditing", message: "Re-auditing hardened program..." });
     const rescored = await scoreContractSecurity(hardened.code, "SOLANA");
     emit({ phase: "auditing", message: `Security score: ${rescored.score}/100. ${rescored.notes}` });
@@ -498,6 +586,7 @@ async function hardenSolanaOnly(
       bestNotes = rescored.notes;
       bestContextQuestion = rescored.contextQuestion;
       bestGasNotes = rescored.gasNotes;
+      if (hardenedSo) bestSo = hardenedSo;
     } else {
       emit({
         phase: "hardening",
@@ -532,12 +621,14 @@ async function hardenSolanaOnly(
     .set({
       status: "success",
       smartContractCode: bestCode,
-      compiledBytecode: null,
+      compiledBytecode: bestSo,
       abiOrIdl: bestIdl,
       securityScore: bestScore,
       securityNotes: bestNotes,
       securityContextQuestion: bestContextQuestion,
-      compileLog: "Simulated build: Anchor/cargo toolchain unavailable in this environment.",
+      compileLog: toolchainUnavailable
+        ? "Anchor/cargo toolchain unavailable in this environment; hardening proceeded without a real rebuild."
+        : compileLog.join("\n\n"),
       testSuiteCode,
       gasNotes: bestGasNotes || null,
     })
@@ -545,6 +636,7 @@ async function hardenSolanaOnly(
     .returning();
 
   emit({ phase: "done", project: updated! });
+  }); // end withTempBuildDir
 }
 
 async function runSolanaPipeline(
@@ -570,111 +662,165 @@ async function runSolanaPipeline(
     bestIdl = generated.idl;
   }
 
-  await setStatus(project.id, "compiling");
-  emit({
-    phase: "compiling",
-    message: "Simulating Anchor build (no cargo/Anchor toolchain in this environment)...",
-  });
+  await withTempBuildDir(async (buildDir) => {
+    await setStatus(project.id, "compiling");
+    emit({ phase: "compiling", message: "Compiling with cargo-build-sbf (Anchor)..." });
 
-  // No cargo/Anchor toolchain is installed, so compilation is honestly simulated:
-  // real code + a real LLM-authored IDL are produced and persisted, but no .so
-  // binary is actually built.
-  const compileLog = "Simulated build: Anchor/cargo toolchain unavailable in this environment. Rust source and IDL were generated but not compiled to a .so binary.";
+    const first = await compileAnchorWithSelfHeal(bestCode, project.contractName, buildDir, emit, project.id);
+    const compileLog: string[] = [...first.log];
+    bestCode = first.code;
 
-  emit({ phase: "auditing", message: "Running LLM security audit..." });
-  let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion, gasNotes: bestGasNotes } =
-    await scoreContractSecurity(bestCode, "SOLANA");
-  emit({
-    phase: "auditing",
-    message: `Security score: ${bestScore}/100. ${bestNotes}`,
-  });
+    let bestSo: string | undefined;
+    let bestRent: number | undefined;
 
-  let hardenAttempt = 0;
-  while (bestScore < TARGET_SECURITY_SCORE && hardenAttempt < MAX_SECURITY_HARDENING_ATTEMPTS) {
-    hardenAttempt += 1;
-    await setStatus(project.id, "hardening");
-    emit({
-      phase: "hardening",
-      message: `Security score ${bestScore}/100 is below the ${TARGET_SECURITY_SCORE} target — hardening program (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS})...`,
-    });
-
-    let hardened: { code: string; idl: string };
-    try {
-      hardened = await hardenAnchorContract(
-        bestCode,
-        bestIdl,
-        bestNotes,
-        bestScore,
-        project.contractName,
-        project.userContext ?? undefined,
-      );
-    } catch (err) {
+    if (first.result.toolchainUnavailable) {
       emit({
-        phase: "hardening",
-        message: `Hardening pass failed to produce valid output (${err instanceof Error ? err.message : "unknown error"}); keeping previous best version.`,
+        phase: "compiling",
+        message: "Anchor/cargo toolchain is unavailable in this environment; continuing with generated source only (no real build).",
       });
-      continue;
-    }
-
-    emit({ phase: "auditing", message: "Re-auditing hardened program..." });
-    const rescored = await scoreContractSecurity(hardened.code, "SOLANA");
-    emit({
-      phase: "auditing",
-      message: `Security score: ${rescored.score}/100. ${rescored.notes}`,
-    });
-
-    if (rescored.score >= bestScore) {
-      bestCode = hardened.code;
-      bestIdl = hardened.idl;
-      bestScore = rescored.score;
-      bestNotes = rescored.notes;
-      bestContextQuestion = rescored.contextQuestion;
-      bestGasNotes = rescored.gasNotes;
+    } else if (!first.result.success) {
+      emit({
+        phase: "compiling",
+        message: "Compilation failed after self-healing attempts; continuing with the last generated source (unbuilt).",
+      });
     } else {
+      bestIdl = first.result.idl ?? bestIdl;
+      bestSo = first.result.soBase64;
+      bestRent = first.result.rentExemptLamports;
       emit({
-        phase: "hardening",
-        message: `Hardening attempt regressed the score (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
+        phase: "compiling",
+        message: `Compilation succeeded: real ${first.result.soSizeBytes} byte .so binary${first.result.idl ? " and real IDL" : ""} produced.`,
       });
     }
-  }
 
-  if (bestScore >= TARGET_SECURITY_SCORE) {
-    bestContextQuestion = null;
+    emit({ phase: "auditing", message: "Running LLM security audit..." });
+    let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion, gasNotes: bestGasNotes } =
+      await scoreContractSecurity(bestCode, "SOLANA");
     emit({
       phase: "auditing",
-      message: `Reached target security score: ${bestScore}/100.`,
+      message: `Security score: ${bestScore}/100. ${bestNotes}`,
     });
-  } else {
-    emit({
-      phase: "auditing",
-      message: `Stopped after ${MAX_SECURITY_HARDENING_ATTEMPTS} hardening attempts. Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
-    });
-    if (bestContextQuestion) {
+
+    let hardenAttempt = 0;
+    while (bestScore < TARGET_SECURITY_SCORE && hardenAttempt < MAX_SECURITY_HARDENING_ATTEMPTS) {
+      hardenAttempt += 1;
+      await setStatus(project.id, "hardening");
+      emit({
+        phase: "hardening",
+        message: `Security score ${bestScore}/100 is below the ${TARGET_SECURITY_SCORE} target — hardening program (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS})...`,
+      });
+
+      let hardened: { code: string; idl: string };
+      try {
+        hardened = await hardenAnchorContract(
+          bestCode,
+          bestIdl,
+          bestNotes,
+          bestScore,
+          project.contractName,
+          project.userContext ?? undefined,
+        );
+      } catch (err) {
+        emit({
+          phase: "hardening",
+          message: `Hardening pass failed to produce valid output (${err instanceof Error ? err.message : "unknown error"}); keeping previous best version.`,
+        });
+        continue;
+      }
+
+      let hardenedSo: string | undefined;
+      let hardenedRent: number | undefined;
+      if (!first.result.toolchainUnavailable) {
+        const recompiled = await compileAnchorWithSelfHeal(
+          hardened.code,
+          project.contractName,
+          buildDir,
+          emit,
+          project.id,
+        );
+        compileLog.push(...recompiled.log);
+        hardened.code = recompiled.code;
+        if (recompiled.result.success) {
+          hardened.idl = recompiled.result.idl ?? hardened.idl;
+          hardenedSo = recompiled.result.soBase64;
+          hardenedRent = recompiled.result.rentExemptLamports;
+        } else {
+          emit({
+            phase: "hardening",
+            message: "Hardened program failed to compile even after self-healing; keeping previous best version.",
+          });
+          continue;
+        }
+      }
+
+      emit({ phase: "auditing", message: "Re-auditing hardened program..." });
+      const rescored = await scoreContractSecurity(hardened.code, "SOLANA");
       emit({
         phase: "auditing",
-        message: `Providing more detail would improve this recommendation: ${bestContextQuestion}`,
+        message: `Security score: ${rescored.score}/100. ${rescored.notes}`,
       });
+
+      if (rescored.score >= bestScore) {
+        bestCode = hardened.code;
+        bestIdl = hardened.idl;
+        bestScore = rescored.score;
+        bestNotes = rescored.notes;
+        bestContextQuestion = rescored.contextQuestion;
+        bestGasNotes = rescored.gasNotes;
+        if (hardenedSo) {
+          bestSo = hardenedSo;
+          bestRent = hardenedRent;
+        }
+      } else {
+        emit({
+          phase: "hardening",
+          message: `Hardening attempt regressed the score (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
+        });
+      }
     }
-  }
 
-  const testSuiteCode = await generateTestSuiteSafe(bestCode, project.contractName, "SOLANA", bestIdl, emit);
+    if (bestScore >= TARGET_SECURITY_SCORE) {
+      bestContextQuestion = null;
+      emit({
+        phase: "auditing",
+        message: `Reached target security score: ${bestScore}/100.`,
+      });
+    } else {
+      emit({
+        phase: "auditing",
+        message: `Stopped after ${MAX_SECURITY_HARDENING_ATTEMPTS} hardening attempts. Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
+      });
+      if (bestContextQuestion) {
+        emit({
+          phase: "auditing",
+          message: `Providing more detail would improve this recommendation: ${bestContextQuestion}`,
+        });
+      }
+    }
 
-  const [updated] = await db
-    .update(contractProjectsTable)
-    .set({
-      status: "success",
-      smartContractCode: bestCode,
-      compiledBytecode: null,
-      abiOrIdl: bestIdl,
-      securityScore: bestScore,
-      securityNotes: bestNotes,
-      securityContextQuestion: bestContextQuestion,
-      compileLog,
-      testSuiteCode,
-      gasNotes: bestGasNotes || null,
-    })
-    .where(eq(contractProjectsTable.id, project.id))
-    .returning();
+    const testSuiteCode = await generateTestSuiteSafe(bestCode, project.contractName, "SOLANA", bestIdl, emit);
 
-  emit({ phase: "done", project: updated! });
+    const rentNote = bestRent != null
+      ? `Real rent-exemption minimum for the compiled program account: ${bestRent.toLocaleString()} lamports (computed by \`solana rent\` from the actual .so size).`
+      : null;
+
+    const [updated] = await db
+      .update(contractProjectsTable)
+      .set({
+        status: "success",
+        smartContractCode: bestCode,
+        compiledBytecode: bestSo ?? null,
+        abiOrIdl: bestIdl,
+        securityScore: bestScore,
+        securityNotes: bestNotes,
+        securityContextQuestion: bestContextQuestion,
+        compileLog: compileLog.join("\n\n"),
+        testSuiteCode,
+        gasNotes: rentNote ? `${bestGasNotes || ""}\n\n${rentNote}`.trim() : (bestGasNotes || null),
+      })
+      .where(eq(contractProjectsTable.id, project.id))
+      .returning();
+
+    emit({ phase: "done", project: updated! });
+  });
 }
