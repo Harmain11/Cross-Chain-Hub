@@ -86,6 +86,19 @@ export async function generateAnchorContract(
   return { code: rustBlock.body, idl: jsonBlock.body };
 }
 
+export async function repairAnchorContract(
+  brokenCode: string,
+  compilerErrors: string,
+  contractName: string,
+): Promise<string> {
+  const system =
+    "You are a senior Solana/Anchor smart-contract engineer fixing a real cargo-build-sbf compile error. " +
+    "Rules: keep the program named/moduled to reflect the given contract name; respond with ONLY a single fenced ```rust code block containing the corrected full file, no prose before or after.";
+  const user = `This Anchor (Rust) program named "${contractName}" fails to compile with cargo-build-sbf.\n\nPROGRAM:\n${brokenCode}\n\nCOMPILER ERRORS:\n${compilerErrors}\n\nFix the program so it compiles cleanly while preserving the original intent.`;
+  const text = await ask(system, user);
+  return extractCodeBlock(text);
+}
+
 export async function hardenSolidityContract(
   code: string,
   securityNotes: string,
