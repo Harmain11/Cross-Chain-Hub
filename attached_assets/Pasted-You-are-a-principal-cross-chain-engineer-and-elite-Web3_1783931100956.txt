@@ -1,0 +1,52 @@
+You are a principal cross-chain engineer and elite Web3 systems architect. Create a comprehensive, production-grade, full-stack application for an "AI-Driven Multi-Chain Onchain Development & Security Toolchain" called "AURA Forge".
+
+The entire platform must be a live, fully functional, multi-file environment built using Next.js (App Router), TypeScript, Tailwind CSS, Framer Motion, Lucide Icons, and shadcn/ui. It must feature a local database user login system linked natively to a PostgreSQL database via Prisma ORM, a background compiler loop, and client-side multi-wallet deployment hooks.
+
+Implement the exact architectural layers and specifications detailed below:
+
+1. DATABASE & SESSION CONFIGURATION (PostgreSQL + Prisma)
+- Initialize a Prisma schema configuration mapping directly to the native environment process.env.DATABASE_URL string.
+- Construct the following relational model structures:
+  * User: id, email, passwordHash, createdAt, updatedAt.
+  * ContractProject: id, userId, prompt, contractName, ecosystem ("EVM" or "SOLANA"), smartContractCode, compiledBytecode, abiOrIdl (JSON), securityScore, networkSelected, deploymentTxHash, liveDeployedAddress, createdAt.
+- Implement server-side auth token validation or API endpoint routes for signup (/api/auth/signup) and login (/api/auth/login) using stateless secure session patterns.
+- UI Shield: Wrap the application in a glassmorphic Authorization landing interface (with Sign In / Sign Up toggles). Guard the dashboard until the user is authenticated.
+
+2. SYSTEM SANDBOX & COMPILER ENVIRONMENT PROVISIONING
+- Configure the Next.js server runtime to verify and utilize local system toolchains for dual-ecosystem execution:
+  * For EVM: Utilizes the Foundry toolkit framework ('forge').
+  * For Solana: Utilizes Cargo/Rust build tools or an Anchor framework stub layer.
+- Provision two distinct hidden compilation project directories inside the filesystem root structure: `/sandbox/evm` and `/sandbox/solana`.
+
+3. CROSS-CHAIN AI & SELF-HEALING ENGINE PIPELINE (/api/forge-contract)
+Build a multi-agent backend handler that dynamically switches processing logic depending on the user's active configuration choice:
+- A. IF ETHEREUM / EVM SELECTOR IS ACTIVE:
+  * Passes the plain English prompt to an LLM instruction layer to write a modern, production-safe Solidity contract (^0.8.24).
+  * Writes the file contents to `/sandbox/evm/src/GeneratedContract.sol` and triggers a background child process spawning `forge compile`.
+  * If the compilation fails, intercept the stderr logs string, feed them directly back to the LLM automatically, and force a self-healing patch pass. On success, parse out the raw bytecode string and ABI array array.
+- B. IF SOLANA SELECTOR IS ACTIVE:
+  * Commands the LLM framework to generate a secure Solana program structured in Rust utilizing standard Anchor Framework procedural macros.
+  * Writes the script to `/sandbox/solana/programs/src/lib.rs` and initializes a background cargo checking/compilation process. Intercept Rust compile errors for an automatic loop correction check. Extract the resulting functional target IDL array configuration.
+- Securely store the generated code, extracted artifacts, and calculated security data metrics straight into the matching User's ContractProject history rows inside the PostgreSQL database.
+
+4. HIGH-FIDELITY INTERACTIVE 3-PANE WORKSPACE VIEW (Axiom / Linear Aesthetics)
+The dashboard environment must enforce a premium cinematic dark aesthetic (Background: `#09090b`, Panels: `#121214`, boundaries: `border-white/5` using Framer Motion spring physics `{ type: "spring", damping: 25, stiffness: 140 }`):
+
+- LEFT WORKSPACE PANEL:
+  * User profile block displaying account details, a historic list of their previously forged contracts parsed from the database, and a clear logout trigger.
+  * A premium Segmented Control Toggle button row: [🌐 Ethereum / EVM] vs [☀️ Solana]. Swapping this dynamically swaps the 3 prompt preset quick-cards.
+  * A natural language text terminal container input field. Beneath it, map an active streaming console pane printing raw stdout execution updates from the background Node child process compilation runs.
+- CENTER PLAYGROUND PANEL:
+  * A full Monaco or Prism code editor layout component rendering the contract code payload. When a build completes, execute a staggered fade-in script to simulate the code typing/streaming onto the screen. Automatically switch language syntax highlighting between 'solidity' and 'rust' depending on the active ecosystem toggle.
+- RIGHT SANDBOX PANEL:
+  * A circular SVG indicator widget mapping out the contract's overall health score.
+  * A "Target Network" dropdown (EVM options: Base Sepolia, Ethereum Sepolia. Solana options: Solana Devnet).
+  * A prominent, pulsing "Deploy to Testnet" button.
+
+5. CROSS-CHAIN TESTNET WALLET INJECTION CONTROLLER
+Configure the "Deploy to Testnet" client action button to evaluate the active workspace layer:
+- If EVM: Connect using client-side 'viem' tools to interface with standard browser wallets (`window.ethereum`). Verify correct Sepolia chain alignment (request network shift if incorrect), extract ABI constructor parameters, display input variables on screen, and fire `walletClient.deployContract`.
+- If Solana: Hook into client-side window.solana injection providers (Phantom/Backpack) to prompt a safe testnet transaction broadcast payload using the compiled binary signature.
+- Capture transaction hex hashes (`0x...`) live, stream verification updates directly to the console terminal panel, and print a clickable block explorer target route once the block registers.
+
+Please build this entire platform step-by-step. Start by defining the Prisma DB schema layout, setting up the auth API pipelines, and assembling the master multi-pane animated UI shell framework.
