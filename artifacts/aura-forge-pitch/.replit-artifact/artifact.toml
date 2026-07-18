@@ -1,0 +1,27 @@
+kind = "slides"
+previewPath = "/aura-forge-pitch/"
+title = "AURA Forge Pitch Deck"
+version = "1.0.0"
+id = "artifacts/aura-forge-pitch"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/aura-forge-pitch/" ]
+localPort = 23937
+
+[services.development]
+run = "pnpm --filter @workspace/aura-forge-pitch run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/aura-forge-pitch", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/aura-forge-pitch/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23937"
+BASE_PATH = "/aura-forge-pitch/"
