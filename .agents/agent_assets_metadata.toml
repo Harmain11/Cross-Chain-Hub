@@ -6,3 +6,9 @@ id = "Qd3TtnQhuFn9QE_hD3Mrl"
 uri = "file://.local/outputs/AURA-Forge-PreSeed-2026.pdf"
 type = "pdf"
 title = "AURA Forge — Pre-Seed Pitch Deck (PDF)"
+
+[[outputs]]
+id = "KhLAeEaEnB_JsCXblMFOZ"
+uri = "file://.local/outputs/AURA-Forge-PreSeed-2026-v2.pdf"
+type = "pdf"
+title = "AURA Forge — Pre-Seed Pitch Deck v2 (PDF)"
