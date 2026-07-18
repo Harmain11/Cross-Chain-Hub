@@ -45,21 +45,65 @@ export default function Slide09Raise() {
             <div className="font-body" style={{ fontSize: '1.3vw', color: '#7A8BA0', marginTop: '0.5vh' }}>Pre-Seed Round · 2026</div>
           </motion.div>
 
-          <div className="flex flex-col" style={{ gap: '1.3vh', marginTop: '2.5vh' }}>
+          <div className="flex flex-col" style={{ gap: '1vh', marginTop: '2vh' }}>
             {segments.map((s, i) => (
               <motion.div key={s.name}
-                {...anim({ opacity: 0, x: -20, rotateY: -15 }, { opacity: 1, x: 0, rotateY: 0 }, 0.3 + i * 0.12)}
-                className="card-3d flex items-center gap-[1.5vw] rounded-[0.8vw] p-[1.3vh_1.5vw]"
+                {...anim({ opacity: 0, x: -20, rotateY: -15 }, { opacity: 1, x: 0, rotateY: 0 }, 0.3 + i * 0.10)}
+                className="card-3d flex items-center gap-[1.5vw] rounded-[0.8vw] p-[1vh_1.5vw]"
                 style={{ background: `rgba(${s.colorRgb},0.06)`, border: `1px solid rgba(${s.colorRgb},0.22)`, boxShadow: `0 4px 20px rgba(${s.colorRgb},0.07)` }}>
                 <div style={{ width: '1.2vw', height: '1.2vw', borderRadius: '0.2vw', background: s.color, flexShrink: 0, boxShadow: `0 0 10px ${s.color}88` }} />
-                <div className="font-display font-bold" style={{ fontSize: '1.8vw', color: s.color, minWidth: '3vw' }}>{s.label}</div>
+                <div className="font-display font-bold" style={{ fontSize: '1.7vw', color: s.color, minWidth: '3vw' }}>{s.label}</div>
                 <div>
-                  <div className="font-display font-semibold" style={{ fontSize: '1.2vw', color: '#F0F4FF' }}>{s.name}</div>
-                  <div className="font-body" style={{ fontSize: '1vw', color: '#7A8BA0' }}>{s.sub}</div>
+                  <div className="font-display font-semibold" style={{ fontSize: '1.1vw', color: '#F0F4FF' }}>{s.name}</div>
+                  <div className="font-body" style={{ fontSize: '0.92vw', color: '#7A8BA0' }}>{s.sub}</div>
                 </div>
               </motion.div>
             ))}
           </div>
+
+          {/* Runway + Seed milestones */}
+          <motion.div {...anim({ opacity: 0, y: 12 }, { opacity: 1, y: 0 }, 0.75)}
+            className="rounded-[0.8vw] p-[1.2vh_1.5vw] mt-[1.5vh]"
+            style={{ background: 'rgba(0,194,255,0.04)', border: '1px solid rgba(0,194,255,0.18)' }}>
+            <div className="flex items-center gap-[2vw] mb-[0.8vh]">
+              <div>
+                <div className="font-display font-bold" style={{ fontSize: '1.7vw', color: '#00C2FF', lineHeight: 1 }}>18 mo</div>
+                <div className="font-body" style={{ fontSize: '0.88vw', color: '#7A8BA0' }}>Runway</div>
+              </div>
+              <div style={{ width: '1px', height: '3vh', background: 'rgba(0,194,255,0.2)' }} />
+              <div className="flex-1">
+                <div className="font-display font-semibold mb-[0.4vh]" style={{ fontSize: '0.88vw', color: '#7A8BA0', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Seed triggers (18 mo out)</div>
+                <div className="flex gap-[1.5vw]">
+                  {['$50K MRR', '5,000 paying devs', 'EVM mainnet live', '2 enterprise signed'].map((m, i) => (
+                    <div key={i} className="flex items-center gap-[0.4vw] font-body" style={{ fontSize: '0.92vw', color: '#F0F4FF' }}>
+                      <div style={{ width: '0.35vw', height: '0.35vw', borderRadius: '50%', background: '#F5A623', boxShadow: '0 0 4px rgba(245,166,35,0.8)' }} />
+                      {m}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* GTM Playbook */}
+          <motion.div {...anim({ opacity: 0, y: 12 }, { opacity: 1, y: 0 }, 0.85)}
+            className="rounded-[0.8vw] p-[1.2vh_1.5vw] mt-[1vh]"
+            style={{ background: 'rgba(245,166,35,0.04)', border: '1px solid rgba(245,166,35,0.18)' }}>
+            <div className="font-display font-semibold mb-[0.6vh]" style={{ fontSize: '0.88vw', color: '#F5A623', textTransform: 'uppercase', letterSpacing: '0.08em' }}>GTM — how we deploy the 25% growth budget</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4vh 2vw' }}>
+              {[
+                ['API-first bottom-up', 'Dev tries free tier → team adopts Pro'],
+                ['Dark Pino distribution', 'Captive audience across sister products'],
+                ['Dev community', 'GitHub OSS tooling, Discord, Twitter/X'],
+                ['Enterprise outbound', 'Convert 3 LOIs → paid contracts in Q3'],
+              ].map(([label, desc], i) => (
+                <div key={i} className="flex items-start gap-[0.5vw] font-body" style={{ fontSize: '0.9vw' }}>
+                  <span style={{ color: '#F5A623', flexShrink: 0 }}>→</span>
+                  <span><span style={{ color: '#F0F4FF', fontWeight: 600 }}>{label}</span><span style={{ color: '#7A8BA0' }}> — {desc}</span></span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
         </div>
 
         {/* Right — 3D tilting donut chart */}
