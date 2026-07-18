@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react"
 import { useLocation } from "wouter"
-import { useGetCurrentUser, useLogin, useSignup } from "@workspace/api-client-react"
+import { useQueryClient } from "@tanstack/react-query"
+import {
+  useGetCurrentUser,
+  useLogin,
+  useSignup,
+  getGetCurrentUserQueryKey,
+} from "@workspace/api-client-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -10,7 +16,10 @@ import { toast } from "sonner"
 
 export default function AuthPage() {
   const [, setLocation] = useLocation()
-  const { data: user, isLoading } = useGetCurrentUser()
+  const queryClient = useQueryClient()
+  // retry: false so a 401 (not logged in) resolves immediately instead of
+  // retrying 3x with backoff and showing a stuck spinner for several seconds.
+  const { data: user, isLoading } = useGetCurrentUser({ query: { retry: false } })
   const [isLogin, setIsLogin] = useState(true)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -43,6 +52,11 @@ export default function AuthPage() {
         await signupMutation.mutateAsync({ data: { email, password } })
         toast.success("Account created successfully")
       }
+      // Clear the stale pre-login user cache so the dashboard's useGetCurrentUser
+      // does a fresh fetch and sees the authenticated session. Without this, the
+      // dashboard reads the cached 401-error state from before login, triggers its
+      // userError guard, and immediately bounces back to the auth page.
+      queryClient.removeQueries({ queryKey: getGetCurrentUserQueryKey() })
       setLocation("/dashboard")
     } catch (err: any) {
       toast.error(err?.data?.error || err?.message || "Authentication failed")
