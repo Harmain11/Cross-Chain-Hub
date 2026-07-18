@@ -26,62 +26,70 @@
   {
     "id": "af010101-0001-4000-8000-000000000004",
     "position": 4,
+    "filepath": "src/pages/slides/Slide04Examples.tsx",
+    "title": "Describe it. Ship it.",
+    "description": "Examples — 5 real use cases: DeFi staking, NFT drop, DAO multisig, vesting, presale",
+    "speakerNotes": ""
+  },
+  {
+    "id": "af010101-0001-4000-8000-000000000005",
+    "position": 5,
     "filepath": "src/pages/slides/Slide04TwoChains.tsx",
     "title": "Two chains. One platform.",
     "description": "EVM + Solana — 95% of on-chain value, dual-chain native coverage",
     "speakerNotes": ""
   },
   {
-    "id": "af010101-0001-4000-8000-000000000005",
-    "position": 5,
+    "id": "af010101-0001-4000-8000-000000000006",
+    "position": 6,
     "filepath": "src/pages/slides/Slide05Market.tsx",
     "title": "$12B market. We are at the front door.",
     "description": "Market — TAM $12B, SAM $3B, SOM $120M",
     "speakerNotes": ""
   },
   {
-    "id": "af010101-0001-4000-8000-000000000006",
-    "position": 6,
+    "id": "af010101-0001-4000-8000-000000000007",
+    "position": 7,
     "filepath": "src/pages/slides/Slide06Revenue.tsx",
     "title": "Three ways we get paid",
     "description": "Business model — API billing, Pro subscription, Ecosystem toll. ARR Y1-Y3.",
     "speakerNotes": ""
   },
   {
-    "id": "af010101-0001-4000-8000-000000000007",
-    "position": 7,
+    "id": "af010101-0001-4000-8000-000000000008",
+    "position": 8,
     "filepath": "src/pages/slides/Slide07Competitive.tsx",
     "title": "Competitive edge",
     "description": "Competitive landscape — vs Copilot, auditors, ChatGPT. Defensibility & security liability.",
     "speakerNotes": ""
   },
   {
-    "id": "af010101-0001-4000-8000-000000000008",
-    "position": 8,
+    "id": "af010101-0001-4000-8000-000000000009",
+    "position": 9,
     "filepath": "src/pages/slides/Slide08Traction.tsx",
     "title": "Where we stand",
     "description": "Traction — 20 beta devs, 1200+ contracts, 847 waitlist. Beta feedback. Roadmap.",
     "speakerNotes": ""
   },
   {
-    "id": "af010101-0001-4000-8000-000000000009",
-    "position": 9,
+    "id": "af010101-0001-4000-8000-000000000010",
+    "position": 10,
     "filepath": "src/pages/slides/Slide09Raise.tsx",
     "title": "We're raising $1,000,000",
     "description": "The ask — $1M pre-seed, use of funds, 18-month runway, Seed trigger milestones, GTM",
     "speakerNotes": ""
   },
   {
-    "id": "af010101-0001-4000-8000-000000000010",
-    "position": 10,
+    "id": "af010101-0001-4000-8000-000000000011",
+    "position": 11,
     "filepath": "src/pages/slides/Slide10Team.tsx",
     "title": "The Team",
     "description": "Founders — George Samaras (CEO, AI/ML) and Harmain Mughal (Co-Founder). Dark Pino context.",
     "speakerNotes": ""
   },
   {
-    "id": "af010101-0001-4000-8000-000000000011",
-    "position": 11,
+    "id": "af010101-0001-4000-8000-000000000012",
+    "position": 12,
     "filepath": "src/pages/slides/Slide10Closing.tsx",
     "title": "Let's build the contract layer for Web3",
     "description": "Closing — AURA Forge, Dark Pino Ecosystem, contact",
