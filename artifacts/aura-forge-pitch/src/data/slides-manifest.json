@@ -4,7 +4,7 @@
     "position": 1,
     "filepath": "src/pages/slides/Slide01Cover.tsx",
     "title": "AURA Forge",
-    "description": "Cover — The AI-Powered Smart Contract Factory, $1M Seed Round 2026",
+    "description": "Cover — The AI-Powered Smart Contract Factory, $1M Pre-Seed Round 2026",
     "speakerNotes": ""
   },
   {
@@ -52,7 +52,7 @@
     "position": 7,
     "filepath": "src/pages/slides/Slide07Competitive.tsx",
     "title": "Competitive edge",
-    "description": "Competitive landscape — vs Copilot, auditors, ChatGPT. 2x2 positioning matrix.",
+    "description": "Competitive landscape — vs Copilot, auditors, ChatGPT. Defensibility & security liability.",
     "speakerNotes": ""
   },
   {
@@ -60,7 +60,7 @@
     "position": 8,
     "filepath": "src/pages/slides/Slide08Traction.tsx",
     "title": "Where we stand",
-    "description": "Traction — Live product features and roadmap milestones",
+    "description": "Traction — 20 beta devs, 1200+ contracts, 847 waitlist. Beta feedback. Roadmap.",
     "speakerNotes": ""
   },
   {
@@ -68,12 +68,20 @@
     "position": 9,
     "filepath": "src/pages/slides/Slide09Raise.tsx",
     "title": "We're raising $1,000,000",
-    "description": "The ask — $1M seed, use of funds breakdown with donut chart",
+    "description": "The ask — $1M pre-seed, use of funds, 18-month runway, Seed trigger milestones, GTM",
     "speakerNotes": ""
   },
   {
     "id": "af010101-0001-4000-8000-000000000010",
     "position": 10,
+    "filepath": "src/pages/slides/Slide10Team.tsx",
+    "title": "The Team",
+    "description": "Founders — George Samaras (CEO, AI/ML) and Harmain Mughal (Co-Founder). Dark Pino context.",
+    "speakerNotes": ""
+  },
+  {
+    "id": "af010101-0001-4000-8000-000000000011",
+    "position": 11,
     "filepath": "src/pages/slides/Slide10Closing.tsx",
     "title": "Let's build the contract layer for Web3",
     "description": "Closing — AURA Forge, Dark Pino Ecosystem, contact",

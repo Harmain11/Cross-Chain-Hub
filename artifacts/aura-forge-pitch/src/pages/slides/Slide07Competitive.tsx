@@ -184,13 +184,53 @@ export default function Slide07Competitive() {
           </div>
         </motion.div>
 
-        {/* Bottom note */}
-        <motion.div {...anim({ opacity: 0 }, { opacity: 1 }, 0.7)}
-          className="flex items-center gap-[0.8vw] mt-[2.5vh]">
-          <div style={{ width: '0.5vw', height: '0.5vw', borderRadius: '50%', background: '#00C2FF', flexShrink: 0 }} />
-          <span className="font-body" style={{ fontSize: '1.1vw', color: '#7A8BA0' }}>
-            AURA Forge is the only solution that covers the full lifecycle — generation, compilation, audit, remediation, and deployment — across both major chains.
-          </span>
+        {/* Defensibility + Security Liability */}
+        <motion.div {...anim({ opacity: 0, y: 12 }, { opacity: 1, y: 0 }, 0.65)}
+          className="flex mt-[2vh]" style={{ gap: '2vw' }}>
+
+          {/* Defensibility */}
+          <div className="flex-1 rounded-[0.8vw] p-[1.3vh_1.5vw]"
+            style={{ background: 'rgba(0,194,255,0.04)', border: '1px solid rgba(0,194,255,0.18)' }}>
+            <div className="font-display font-semibold mb-[0.8vh]" style={{ fontSize: '0.95vw', color: '#00C2FF', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Why we're defensible — OpenAI can't just copy this
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.45vh 1.5vw' }}>
+              {[
+                ['Compiler-feedback loop', 'Months of training data from real solc/cargo errors — not replicable overnight'],
+                ['Dual-chain native', 'EVM + Solana built from the ground up, not bolted on as an afterthought'],
+                ['47-pattern audit DB', 'Compounds with every contract — proprietary vulnerability knowledge base'],
+                ['Dark Pino distribution', 'Built-in captive audience across ecosystem — no cold start problem'],
+              ].map(([title, desc], i) => (
+                <div key={i} className="flex items-start gap-[0.5vw]">
+                  <div style={{ width: '0.4vw', height: '0.4vw', borderRadius: '50%', background: '#00C2FF', flexShrink: 0, marginTop: '0.6vh', boxShadow: '0 0 5px rgba(0,194,255,0.8)' }} />
+                  <div>
+                    <span className="font-display font-semibold" style={{ fontSize: '0.95vw', color: '#F0F4FF' }}>{title} — </span>
+                    <span className="font-body" style={{ fontSize: '0.9vw', color: '#7A8BA0' }}>{desc}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Security liability */}
+          <div className="rounded-[0.8vw] p-[1.3vh_1.5vw]" style={{ width: '28vw', background: 'rgba(245,166,35,0.04)', border: '1px solid rgba(245,166,35,0.2)' }}>
+            <div className="font-display font-semibold mb-[0.8vh]" style={{ fontSize: '0.95vw', color: '#F5A623', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Security responsibility
+            </div>
+            <div className="flex flex-col" style={{ gap: '0.5vh' }}>
+              {[
+                'Output labelled "AI-assisted" — developer retains ownership & sign-off',
+                '0–100 audit score with explicit deploy-safe threshold (≥80)',
+                'No deploy-gate below score threshold without manual override',
+                'Terms of service include clear indemnification boundaries',
+              ].map((item, i) => (
+                <div key={i} className="flex items-start gap-[0.5vw] font-body" style={{ fontSize: '0.92vw', color: '#7A8BA0' }}>
+                  <span style={{ color: '#F5A623', flexShrink: 0 }}>→</span>
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </motion.div>
       </div>
 
