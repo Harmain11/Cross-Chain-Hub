@@ -113,13 +113,13 @@ export default function Slide06Revenue() {
         </motion.div>
 
         {/* Beautiful area line chart */}
-        <motion.div {...anim({ opacity: 0, y: 18 }, { opacity: 1, y: 0 }, 0.62)} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <motion.div {...anim({ opacity: 0, y: 18 }, { opacity: 1, y: 0 }, 0.62)} className="flex-1 flex flex-col min-h-0" style={{ minHeight: '18vh' }}>
           <div className="font-display font-semibold mb-[1vh]" style={{ fontSize: '1.05vw', color: '#7A8BA0', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             Projected ARR — 36 Month View
           </div>
 
           <div className="flex-1 relative min-h-0">
-            <svg viewBox="0 0 520 210" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}>
+            <svg viewBox="0 0 520 210" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}>
               <defs>
                 {/* Area gradient */}
                 <linearGradient id="areaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
