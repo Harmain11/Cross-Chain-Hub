@@ -42,6 +42,12 @@ router.post("/auth/signup", async (req, res) => {
   }
 
   req.session.userId = user.id;
+  // Explicitly save before responding so the session row exists in PostgreSQL
+  // before the client fires its next request. Without this, the async DB write
+  // races with the immediately-following GET /api/auth/me and returns 401.
+  await new Promise<void>((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
   res.status(201).json(
     SignupResponse.parse({
       id: user.id,
@@ -71,6 +77,10 @@ router.post("/auth/login", async (req, res) => {
   }
 
   req.session.userId = user.id;
+  // Explicitly save before responding — same race-condition fix as signup.
+  await new Promise<void>((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
   res.json(
     LoginResponse.parse({
       id: user.id,
