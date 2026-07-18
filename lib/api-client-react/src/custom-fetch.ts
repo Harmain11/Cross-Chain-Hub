@@ -360,7 +360,10 @@ export async function customFetch<T = unknown>(
 
   const requestInfo = { method, url: resolveUrl(input) };
 
-  const response = await fetch(input, { ...init, method, headers });
+  // credentials:'include' is required so the browser sends the session cookie
+  // on every request. Without it the autoscale proxy layer treats API calls as
+  // cross-origin and omits cookies, causing a 401 immediately after login.
+  const response = await fetch(input, { ...init, method, headers, credentials: "include" });
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);

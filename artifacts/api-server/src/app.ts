@@ -7,6 +7,10 @@ import { sessionMiddleware } from "./lib/session";
 
 const app: Express = express();
 
+// Trust the Replit autoscale reverse-proxy so req.protocol, req.ip, and
+// secure-cookie behaviour all reflect the real upstream HTTPS connection.
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,
