@@ -30,3 +30,9 @@ id = "bu1B7ZZFV2t0sS_T3qb7a"
 uri = "file://.local/outputs/AURA-Forge-PreSeed-2026-v5.pdf"
 type = "pdf"
 title = "AURA Forge — Pre-Seed 2026 v5"
+
+[[outputs]]
+id = "jhHrLBsAq2gXmLQGjCk_a"
+uri = "file://.local/outputs/AURA-Forge-PreSeed-2026-v6.pdf"
+type = "pdf"
+title = "AURA Forge — Pre-Seed 2026 v6"
