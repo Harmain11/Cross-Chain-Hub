@@ -418,7 +418,7 @@ export default function DashboardPage() {
   const handleSaveEditedCodeRef = useRef(handleSaveEditedCode)
   handleSaveEditedCodeRef.current = handleSaveEditedCode
 
-  const consoleEndRef = useRef<HTMLDivElement>(null)
+  const consoleViewportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (userError) {
@@ -427,8 +427,9 @@ export default function DashboardPage() {
   }, [userError, setLocation])
 
   useEffect(() => {
-    if (consoleEndRef.current) {
-      consoleEndRef.current.scrollIntoView({ behavior: "smooth" })
+    const el = consoleViewportRef.current
+    if (el) {
+      el.scrollTop = el.scrollHeight
     }
   }, [consoleLogs])
 
@@ -1104,7 +1105,7 @@ export default function DashboardPage() {
             ))}
           </div>
         )}
-        <div className="flex-1 relative border-b border-border group">
+        <div className="flex-1 relative border-b border-border group overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-10 bg-gradient-to-b from-black/80 to-transparent z-10 pointer-events-none flex items-center justify-between px-4">
             <span className="text-xs font-mono text-muted-foreground opacity-50 uppercase tracking-widest">
               {activeProject
@@ -1266,13 +1267,13 @@ export default function DashboardPage() {
 
         {/* Console */}
         <div className="h-72 min-h-[18rem] bg-[#050505] flex flex-col font-mono text-xs">
-          <div className="h-9 border-b border-border flex items-center px-5 justify-between bg-card/50">
+          <div className="h-9 border-b border-border flex items-center px-5 justify-between bg-card/50 shrink-0">
             <span className="text-[10px] text-muted-foreground uppercase tracking-widest flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${isForging || isDeploying ? 'bg-primary animate-pulse shadow-[0_0_5px_var(--primary)]' : 'bg-muted-foreground'}`} />
               Terminal Output
             </span>
           </div>
-          <ScrollArea className="flex-1 p-5 text-[#888]">
+          <div ref={consoleViewportRef} className="flex-1 overflow-y-auto p-5 text-[#888]">
             {consoleLogs.map((log, i) => (
               <div key={i} className="mb-1.5 leading-relaxed flex gap-3">
                 <span className="text-primary/50 shrink-0 select-none">[{new Date().toISOString().substring(11, 19)}]</span>
@@ -1284,15 +1285,14 @@ export default function DashboardPage() {
                 }>{log.message}</span>
               </div>
             ))}
-            <div ref={consoleEndRef} />
-          </ScrollArea>
+          </div>
         </div>
       </div>
 
       {/* Right Panel: Data & Deploy */}
       <div className="w-[360px] min-w-[360px] border-l border-border bg-card/30 backdrop-blur-md flex flex-col z-10 relative shadow-[-10px_0_30px_rgba(0,0,0,0.5)]">
         {activeProject ? (
-          <>
+          <ScrollArea className="flex-1">
             <div className="p-7 border-b border-border flex flex-col items-center justify-center bg-black/20">
               <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest w-full mb-6">Security Analysis</span>
               
@@ -1395,7 +1395,7 @@ export default function DashboardPage() {
               </Button>
             </div>
 
-            <div className="flex-1 p-6 flex flex-col justify-end bg-black/10">
+            <div className="p-6 bg-black/10">
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Target Network</Label>
@@ -1599,7 +1599,7 @@ export default function DashboardPage() {
                 )}
               </div>
             </div>
-          </>
+          </ScrollArea>
         ) : (
           <div className="flex-1 flex items-center justify-center text-muted-foreground/30 flex-col p-6 text-center">
             <Icons.Shield className="w-16 h-16 mb-4" />
