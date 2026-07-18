@@ -71,21 +71,45 @@ export default function Slide08Traction() {
         </motion.div>
 
         {/* KPI cards with 3D flip entrance */}
-        <div className="flex" style={{ gap: '1.5vw', marginBottom: '2.2vh', perspective: '1000px' }}>
+        <div className="flex" style={{ gap: '1.2vw', marginBottom: '1.8vh', perspective: '1000px' }}>
           <KpiCard value="1,200+" label="Contracts Generated"  sub="In private beta — EVM and Solana" delay={0.22} accent="#00C2FF" rgb="0,194,255" />
-          <KpiCard value="847"    label="Developer Waitlist"   sub="Organic signups, zero paid acquisition" delay={0.34} accent="#00C2FF" rgb="0,194,255" />
+          <KpiCard value="20"     label="Beta Developers"      sub="Hand-picked testers with full access" delay={0.30} accent="#9F58FA" rgb="159,88,250" />
+          <KpiCard value="847"    label="Developer Waitlist"   sub="Organic signups, zero paid acquisition" delay={0.38} accent="#00C2FF" rgb="0,194,255" />
           <KpiCard value="94%"    label="Compile Success Rate" sub="After autonomous self-healing loop" delay={0.46} accent="#F5A623" rgb="245,166,35" />
-          <KpiCard value="3"      label="Enterprise LOIs"      sub="DeFi protocols in active discussions" delay={0.58} accent="#00C2FF" rgb="0,194,255" />
+          <KpiCard value="3"      label="Enterprise LOIs"      sub="DeFi protocols in active discussions" delay={0.54} accent="#00C2FF" rgb="0,194,255" />
         </div>
 
+        {/* Beta developer testimonials */}
+        <motion.div {...anim({ opacity: 0, y: 12 }, { opacity: 1, y: 0 }, 0.60)}
+          className="mb-[1.8vh]">
+          <div className="font-display font-semibold mb-[1vh]" style={{ fontSize: '1.05vw', color: '#9F58FA', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            Beta Developer Feedback
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1vw' }}>
+            {[
+              { quote: 'Generated a Solana staking program, audited and deployed — in under 8 minutes. Nothing else comes close.', handle: '@0xdev_sol · Solana Builder' },
+              { quote: 'The self-healing compile loop is magic. It caught a reentrancy bug my own audit missed.', handle: '@evmwizard · DeFi Protocol Lead' },
+              { quote: 'Replaced our entire audit vendor workflow. The 0–100 security score gives us exactly what we need for investors.', handle: '@chainlab_xyz · Web3 Startup Founder' },
+            ].map(({ quote, handle }, i) => (
+              <motion.div key={i} {...anim({ opacity: 0, y: 10 }, { opacity: 1, y: 0 }, 0.66 + i * 0.08)}
+                className="rounded-[0.8vw] p-[1.2vh_1.3vw]"
+                style={{ background: 'rgba(159,88,250,0.05)', border: '1px solid rgba(159,88,250,0.2)', boxShadow: '0 4px 20px rgba(159,88,250,0.06)' }}>
+                <div style={{ color: '#9F58FA', fontSize: '1.4vw', lineHeight: 1, marginBottom: '0.5vh' }}>"</div>
+                <p className="font-body" style={{ fontSize: '0.95vw', color: '#C8D4E8', lineHeight: 1.45, marginBottom: '0.8vh' }}>{quote}</p>
+                <div className="font-body" style={{ fontSize: '0.85vw', color: '#9F58FA' }}>{handle}</div>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
+
         {/* Live features strip */}
-        <motion.div {...anim({ opacity: 0, y: 15 }, { opacity: 1, y: 0 }, 0.65)}
-          className="rounded-[0.9vw] p-[1.4vh_1.8vw] mb-[2.2vh]"
+        <motion.div {...anim({ opacity: 0, y: 15 }, { opacity: 1, y: 0 }, 0.80)}
+          className="rounded-[0.9vw] p-[1vh_1.8vw] mb-[1.8vh]"
           style={{ background: 'rgba(0,194,255,0.04)', border: '1px solid rgba(0,194,255,0.15)', boxShadow: '0 0 30px rgba(0,194,255,0.04)' }}>
-          <div className="font-display font-semibold mb-[1vh]" style={{ fontSize: '1.05vw', color: '#7A8BA0', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          <div className="font-display font-semibold mb-[0.7vh]" style={{ fontSize: '1.05vw', color: '#7A8BA0', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             What's Live Today
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.7vh 2vw' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5vh 2vw' }}>
             {[
               'EVM + Solana generation, compile, audit & deploy',
               '47-pattern security audit with 0–100 scoring',
@@ -94,10 +118,10 @@ export default function Slide08Traction() {
               'Foundry + Anchor/TypeScript test suite generation',
               'REST API + team workspaces — embed anywhere',
             ].map((item, i) => (
-              <motion.div key={i} {...anim({ opacity: 0, x: i % 3 === 0 ? -10 : i % 3 === 2 ? 10 : 0, y: 5 }, { opacity: 1, x: 0, y: 0 }, 0.72 + i * 0.06)}
+              <motion.div key={i} {...anim({ opacity: 0, x: i % 3 === 0 ? -10 : i % 3 === 2 ? 10 : 0, y: 5 }, { opacity: 1, x: 0, y: 0 }, 0.85 + i * 0.05)}
                 className="flex items-center gap-[0.7vw]">
                 <div style={{ width: '0.45vw', height: '0.45vw', borderRadius: '50%', background: '#00C2FF', flexShrink: 0, boxShadow: '0 0 6px rgba(0,194,255,0.8)' }} />
-                <span className="font-body" style={{ fontSize: '1.05vw', color: '#F0F4FF' }}>{item}</span>
+                <span className="font-body" style={{ fontSize: '0.98vw', color: '#F0F4FF' }}>{item}</span>
               </motion.div>
             ))}
           </div>
