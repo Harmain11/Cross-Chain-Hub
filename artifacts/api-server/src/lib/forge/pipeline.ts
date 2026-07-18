@@ -49,6 +49,12 @@ const MAX_HEAL_ATTEMPTS = 3;
 const MAX_SECURITY_HARDENING_ATTEMPTS = 5;
 const TARGET_SECURITY_SCORE = 95;
 
+// Solana-specific limits: cargo-build-sbf is 4–7 min per compile, so we
+// lower the iteration count and accept a slightly less aggressive target to
+// keep total generation time under ~15 minutes.
+const MAX_SOLANA_HARDENING_ATTEMPTS = 2;
+const TARGET_SOLANA_SECURITY_SCORE = 85;
+
 /** Compiles `code`, self-healing compiler errors up to MAX_HEAL_ATTEMPTS times. */
 async function compileWithSelfHeal(
   initialCode: string,
@@ -91,10 +97,13 @@ async function compileWithSelfHeal(
 }
 
 /**
- * Compiles an Anchor program to a real .so via cargo-build-sbf and generates
- * its real IDL, self-healing compiler errors up to MAX_HEAL_ATTEMPTS times.
- * `buildDir` is reused across attempts (and across hardening iterations by
- * the caller) so incremental cargo compilation keeps repeat attempts fast.
+ * Compiles an Anchor program to a real .so via cargo-build-sbf and (unless
+ * skipIdl=true) generates the real IDL, self-healing compiler errors up to
+ * MAX_HEAL_ATTEMPTS times.  `buildDir` is reused across attempts so
+ * incremental cargo compilation keeps repeat attempts fast.
+ *
+ * Pass `skipIdl: true` for intermediate validation compiles to save the
+ * ~3-minute `anchor idl build` step; only the final save needs a real IDL.
  */
 async function compileAnchorWithSelfHeal(
   initialCode: string,
@@ -102,14 +111,15 @@ async function compileAnchorWithSelfHeal(
   buildDir: string,
   emit: (event: ForgeEvent) => void,
   projectId: number,
+  { skipIdl = false }: { skipIdl?: boolean } = {},
 ): Promise<{ code: string; result: AnchorCompileResult; log: string[] }> {
   const log: string[] = [];
   let code = initialCode;
 
   await setStatus(projectId, "compiling");
-  emit({ phase: "compiling", message: "Compiling with cargo-build-sbf (Anchor)..." });
+  emit({ phase: "compiling", message: `Compiling with cargo-build-sbf (Anchor)${skipIdl ? " (validation pass, skipping IDL build)" : ""}...` });
 
-  let result = await compileAnchorProgram(code, contractName, buildDir);
+  let result = await compileAnchorProgram(code, contractName, buildDir, { skipIdl });
 
   if (result.toolchainUnavailable) {
     log.push(result.log);
@@ -130,7 +140,7 @@ async function compileAnchorWithSelfHeal(
 
     await setStatus(projectId, "compiling");
     emit({ phase: "compiling", message: "Recompiling patched program with cargo-build-sbf..." });
-    result = await compileAnchorProgram(code, contractName, buildDir);
+    result = await compileAnchorProgram(code, contractName, buildDir, { skipIdl });
   }
 
   if (result.success) {
@@ -485,6 +495,14 @@ async function hardenEvmOnly(
   emit({ phase: "done", project: updated! });
 }
 
+/**
+ * Optimised Solana "Improve Security" re-run.
+ *
+ * Same strategy as runSolanaPipeline: run the hardening loop with LLM-only
+ * calls (no cargo recompile per iteration), then do one final compile of the
+ * best-scoring code.  This keeps the total time under ~10 minutes instead of
+ * the ~35 minutes a 5-pass loop with full recompiles would take.
+ */
 async function hardenSolanaOnly(
   child: ContractProjectRow,
   parent: ContractProjectRow,
@@ -501,8 +519,8 @@ async function hardenSolanaOnly(
   let bestNotes = parent.securityNotes ?? "";
   let bestContextQuestion: string | null = null;
   let bestGasNotes = parent.gasNotes ?? "";
+  // Keep the parent's compiled binary as the fallback until a better one is produced.
   let bestSo: string | null = parent.compiledBytecode ?? null;
-  let toolchainUnavailable = false;
 
   if (parent.securityScore === null) {
     emit({ phase: "auditing", message: "Running LLM security audit..." });
@@ -515,64 +533,31 @@ async function hardenSolanaOnly(
 
   const compileLog: string[] = [];
 
-  await withTempBuildDir(async (buildDir) => {
+  // ── LLM-only hardening loop ──────────────────────────────────────────────
   let hardenAttempt = 0;
   while (
-    hardenAttempt < MAX_SECURITY_HARDENING_ATTEMPTS &&
-    (hardenAttempt === 0 || bestScore < TARGET_SECURITY_SCORE)
+    hardenAttempt < MAX_SOLANA_HARDENING_ATTEMPTS &&
+    (hardenAttempt === 0 || bestScore < TARGET_SOLANA_SECURITY_SCORE)
   ) {
     hardenAttempt += 1;
     await setStatus(child.id, "hardening");
     emit({
       phase: "hardening",
-      message: `Hardening program (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS}), current score ${bestScore}/100...`,
+      message: `Hardening program (attempt ${hardenAttempt}/${MAX_SOLANA_HARDENING_ATTEMPTS}, LLM only), current score ${bestScore}/100...`,
     });
 
     let hardened: { code: string; idl: string };
     try {
       hardened = await hardenAnchorContract(
-        bestCode,
-        bestIdl,
-        bestNotes,
-        bestScore,
-        parent.contractName,
+        bestCode, bestIdl, bestNotes, bestScore, parent.contractName,
         child.userContext ?? undefined,
       );
     } catch (err) {
       emit({
         phase: "hardening",
-        message: `Hardening pass failed to produce valid output (${err instanceof Error ? err.message : "unknown error"}); keeping previous best version.`,
+        message: `Hardening pass failed (${err instanceof Error ? err.message : "unknown error"}); keeping previous best version.`,
       });
       continue;
-    }
-
-    let hardenedSo: string | undefined;
-    if (!toolchainUnavailable) {
-      const recompiled = await compileAnchorWithSelfHeal(
-        hardened.code,
-        parent.contractName,
-        buildDir,
-        emit,
-        child.id,
-      );
-      compileLog.push(...recompiled.log);
-      hardened.code = recompiled.code;
-      if (recompiled.result.toolchainUnavailable) {
-        toolchainUnavailable = true;
-        emit({
-          phase: "compiling",
-          message: "Anchor/cargo toolchain is unavailable in this environment; continuing without a real rebuild.",
-        });
-      } else if (recompiled.result.success) {
-        hardened.idl = recompiled.result.idl ?? hardened.idl;
-        hardenedSo = recompiled.result.soBase64;
-      } else {
-        emit({
-          phase: "hardening",
-          message: "Hardened program failed to compile even after self-healing; keeping previous best version.",
-        });
-        continue;
-      }
     }
 
     emit({ phase: "auditing", message: "Re-auditing hardened program..." });
@@ -586,33 +571,50 @@ async function hardenSolanaOnly(
       bestNotes = rescored.notes;
       bestContextQuestion = rescored.contextQuestion;
       bestGasNotes = rescored.gasNotes;
-      if (hardenedSo) bestSo = hardenedSo;
     } else {
       emit({
         phase: "hardening",
-        message: `Hardening attempt regressed the score (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
+        message: `Score regressed (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
       });
     }
   }
 
-  if (bestScore >= TARGET_SECURITY_SCORE) {
+  if (bestScore >= TARGET_SOLANA_SECURITY_SCORE) {
     bestContextQuestion = null;
   }
 
   emit({
     phase: "auditing",
     message:
-      bestScore >= TARGET_SECURITY_SCORE
+      bestScore >= TARGET_SOLANA_SECURITY_SCORE
         ? `Reached target security score: ${bestScore}/100.`
-        : `Stopped after ${hardenAttempt} hardening attempt(s). Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
+        : `Stopped after ${hardenAttempt} hardening attempt(s). Best achieved: ${bestScore}/100 (target ${TARGET_SOLANA_SECURITY_SCORE}).`,
   });
 
-  if (bestScore < TARGET_SECURITY_SCORE && bestContextQuestion) {
-    emit({
-      phase: "auditing",
-      message: `Providing more detail would improve this recommendation: ${bestContextQuestion}`,
-    });
+  if (bestScore < TARGET_SOLANA_SECURITY_SCORE && bestContextQuestion) {
+    emit({ phase: "auditing", message: `Providing more detail would improve this recommendation: ${bestContextQuestion}` });
   }
+
+  // ── One final cargo compile of the best-scoring code (with IDL) ─────────
+  let toolchainUnavailable = false;
+  await withTempBuildDir(async (buildDir) => {
+    emit({ phase: "compiling", message: "Final compile of best-scoring code (with IDL build)..." });
+    const final = await compileAnchorWithSelfHeal(
+      bestCode, parent.contractName, buildDir, emit, child.id, { skipIdl: false },
+    );
+    compileLog.push(...final.log);
+    if (final.result.toolchainUnavailable) {
+      toolchainUnavailable = true;
+      emit({ phase: "compiling", message: "Anchor/cargo toolchain unavailable; keeping parent's compiled binary." });
+    } else if (final.result.success) {
+      bestCode = final.code;
+      bestIdl = final.result.idl ?? bestIdl;
+      bestSo = final.result.soBase64 ?? bestSo;
+      emit({ phase: "compiling", message: `Final compile succeeded: ${final.result.soSizeBytes} bytes${final.result.idl ? ", real IDL produced" : ""}.` });
+    } else {
+      emit({ phase: "compiling", message: "Final compile failed; keeping parent's compiled binary and best LLM IDL." });
+    }
+  });
 
   const testSuiteCode = await generateTestSuiteSafe(bestCode, parent.contractName, "SOLANA", bestIdl, emit);
 
@@ -627,7 +629,7 @@ async function hardenSolanaOnly(
       securityNotes: bestNotes,
       securityContextQuestion: bestContextQuestion,
       compileLog: toolchainUnavailable
-        ? "Anchor/cargo toolchain unavailable in this environment; hardening proceeded without a real rebuild."
+        ? "Anchor/cargo toolchain unavailable; hardening proceeded without a real rebuild."
         : compileLog.join("\n\n"),
       testSuiteCode,
       gasNotes: bestGasNotes || null,
@@ -636,129 +638,101 @@ async function hardenSolanaOnly(
     .returning();
 
   emit({ phase: "done", project: updated! });
-  }); // end withTempBuildDir
 }
 
+/**
+ * Optimised Solana pipeline.
+ *
+ * Key differences vs the EVM pipeline:
+ * - cargo-build-sbf takes 4-7 min; doing it inside every hardening iteration
+ *   would make a 5-pass run take 35+ minutes.
+ * - Strategy: one initial cargo compile (with skipIdl) to validate the
+ *   generated code, then a fast LLM-only hardening loop, then one final
+ *   cargo compile (with IDL) of the best-scoring code.
+ * - Lower iteration cap (MAX_SOLANA_HARDENING_ATTEMPTS) and score target
+ *   (TARGET_SOLANA_SECURITY_SCORE) vs EVM because Rust/Anchor programs have
+ *   naturally higher starting scores and fewer low-hanging fixes.
+ */
 async function runSolanaPipeline(
   project: ContractProjectRow,
   emit: (event: ForgeEvent) => void,
 ) {
   await setStatus(project.id, "generating");
-  emit({
-    phase: "generating",
-    message: "Generating Anchor (Rust) program and IDL...",
-  });
+  emit({ phase: "generating", message: "Generating Anchor (Rust) program and IDL..." });
 
-  let bestCode: string;
-  let bestIdl: string;
-  {
-    const template = getTemplate("SOLANA", project.templateId);
-    const generated = await generateAnchorContract(
-      project.prompt,
-      project.contractName,
-      template?.promptFragment,
-    );
-    bestCode = generated.code;
-    bestIdl = generated.idl;
-  }
+  const template = getTemplate("SOLANA", project.templateId);
+  const generated = await generateAnchorContract(
+    project.prompt,
+    project.contractName,
+    template?.promptFragment,
+  );
+  let bestCode = generated.code;
+  let bestIdl = generated.idl;
 
   await withTempBuildDir(async (buildDir) => {
-    await setStatus(project.id, "compiling");
-    emit({ phase: "compiling", message: "Compiling with cargo-build-sbf (Anchor)..." });
+    const compileLog: string[] = [];
+    let toolchainUnavailable = false;
 
-    const first = await compileAnchorWithSelfHeal(bestCode, project.contractName, buildDir, emit, project.id);
-    const compileLog: string[] = [...first.log];
-    bestCode = first.code;
+    // ── Step 1: initial compile (validation only, skip slow IDL build) ──────
+    const initial = await compileAnchorWithSelfHeal(
+      bestCode, project.contractName, buildDir, emit, project.id, { skipIdl: true },
+    );
+    compileLog.push(...initial.log);
+    bestCode = initial.code;
 
-    let bestSo: string | undefined;
-    let bestRent: number | undefined;
+    let initialSo: string | undefined;
+    let initialRent: number | undefined;
 
-    if (first.result.toolchainUnavailable) {
+    if (initial.result.toolchainUnavailable) {
+      toolchainUnavailable = true;
       emit({
         phase: "compiling",
-        message: "Anchor/cargo toolchain is unavailable in this environment; continuing with generated source only (no real build).",
+        message: "Anchor/cargo toolchain unavailable; continuing with generated source only.",
       });
-    } else if (!first.result.success) {
+    } else if (!initial.result.success) {
       emit({
         phase: "compiling",
         message: "Compilation failed after self-healing attempts; continuing with the last generated source (unbuilt).",
       });
     } else {
-      bestIdl = first.result.idl ?? bestIdl;
-      bestSo = first.result.soBase64;
-      bestRent = first.result.rentExemptLamports;
-      emit({
-        phase: "compiling",
-        message: `Compilation succeeded: real ${first.result.soSizeBytes} byte .so binary${first.result.idl ? " and real IDL" : ""} produced.`,
-      });
+      initialSo = initial.result.soBase64;
+      initialRent = initial.result.rentExemptLamports;
+      emit({ phase: "compiling", message: `Validation compile succeeded (${initial.result.soSizeBytes} bytes). Skipping IDL build until final pass.` });
     }
 
+    // ── Step 2: initial security audit ──────────────────────────────────────
     emit({ phase: "auditing", message: "Running LLM security audit..." });
     let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion, gasNotes: bestGasNotes } =
       await scoreContractSecurity(bestCode, "SOLANA");
-    emit({
-      phase: "auditing",
-      message: `Security score: ${bestScore}/100. ${bestNotes}`,
-    });
+    emit({ phase: "auditing", message: `Security score: ${bestScore}/100. ${bestNotes}` });
 
+    // ── Step 3: LLM-only hardening loop (no cargo recompile per iteration) ──
     let hardenAttempt = 0;
-    while (bestScore < TARGET_SECURITY_SCORE && hardenAttempt < MAX_SECURITY_HARDENING_ATTEMPTS) {
+    while (bestScore < TARGET_SOLANA_SECURITY_SCORE && hardenAttempt < MAX_SOLANA_HARDENING_ATTEMPTS) {
       hardenAttempt += 1;
       await setStatus(project.id, "hardening");
       emit({
         phase: "hardening",
-        message: `Security score ${bestScore}/100 is below the ${TARGET_SECURITY_SCORE} target — hardening program (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS})...`,
+        message: `Score ${bestScore}/100 below target ${TARGET_SOLANA_SECURITY_SCORE} — hardening (attempt ${hardenAttempt}/${MAX_SOLANA_HARDENING_ATTEMPTS}, LLM only)...`,
       });
 
       let hardened: { code: string; idl: string };
       try {
         hardened = await hardenAnchorContract(
-          bestCode,
-          bestIdl,
-          bestNotes,
-          bestScore,
-          project.contractName,
+          bestCode, bestIdl, bestNotes, bestScore, project.contractName,
           project.userContext ?? undefined,
         );
       } catch (err) {
         emit({
           phase: "hardening",
-          message: `Hardening pass failed to produce valid output (${err instanceof Error ? err.message : "unknown error"}); keeping previous best version.`,
+          message: `Hardening pass failed (${err instanceof Error ? err.message : "unknown error"}); keeping previous best version.`,
         });
         continue;
       }
 
-      let hardenedSo: string | undefined;
-      let hardenedRent: number | undefined;
-      if (!first.result.toolchainUnavailable) {
-        const recompiled = await compileAnchorWithSelfHeal(
-          hardened.code,
-          project.contractName,
-          buildDir,
-          emit,
-          project.id,
-        );
-        compileLog.push(...recompiled.log);
-        hardened.code = recompiled.code;
-        if (recompiled.result.success) {
-          hardened.idl = recompiled.result.idl ?? hardened.idl;
-          hardenedSo = recompiled.result.soBase64;
-          hardenedRent = recompiled.result.rentExemptLamports;
-        } else {
-          emit({
-            phase: "hardening",
-            message: "Hardened program failed to compile even after self-healing; keeping previous best version.",
-          });
-          continue;
-        }
-      }
-
       emit({ phase: "auditing", message: "Re-auditing hardened program..." });
       const rescored = await scoreContractSecurity(hardened.code, "SOLANA");
-      emit({
-        phase: "auditing",
-        message: `Security score: ${rescored.score}/100. ${rescored.notes}`,
-      });
+      emit({ phase: "auditing", message: `Security score: ${rescored.score}/100. ${rescored.notes}` });
 
       if (rescored.score >= bestScore) {
         bestCode = hardened.code;
@@ -767,37 +741,67 @@ async function runSolanaPipeline(
         bestNotes = rescored.notes;
         bestContextQuestion = rescored.contextQuestion;
         bestGasNotes = rescored.gasNotes;
-        if (hardenedSo) {
-          bestSo = hardenedSo;
-          bestRent = hardenedRent;
-        }
       } else {
         emit({
           phase: "hardening",
-          message: `Hardening attempt regressed the score (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
+          message: `Score regressed (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
         });
       }
     }
 
-    if (bestScore >= TARGET_SECURITY_SCORE) {
+    if (bestScore >= TARGET_SOLANA_SECURITY_SCORE) {
       bestContextQuestion = null;
-      emit({
-        phase: "auditing",
-        message: `Reached target security score: ${bestScore}/100.`,
-      });
+      emit({ phase: "auditing", message: `Reached target security score: ${bestScore}/100.` });
     } else {
       emit({
         phase: "auditing",
-        message: `Stopped after ${MAX_SECURITY_HARDENING_ATTEMPTS} hardening attempts. Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
+        message: `Stopped after ${hardenAttempt} hardening attempt(s). Best achieved: ${bestScore}/100 (target ${TARGET_SOLANA_SECURITY_SCORE}).`,
       });
       if (bestContextQuestion) {
-        emit({
-          phase: "auditing",
-          message: `Providing more detail would improve this recommendation: ${bestContextQuestion}`,
-        });
+        emit({ phase: "auditing", message: `Providing more detail would improve this recommendation: ${bestContextQuestion}` });
       }
     }
 
+    // ── Step 4: one final cargo compile with real IDL generation ────────────
+    let bestSo: string | undefined = initialSo;
+    let bestRent: number | undefined = initialRent;
+
+    if (!toolchainUnavailable && bestCode !== initial.code) {
+      // Best code differs from the initially compiled code — recompile it
+      // with full IDL generation so the saved artefact is consistent.
+      emit({ phase: "compiling", message: "Final compile of best-scoring code (with IDL build)..." });
+      const final = await compileAnchorWithSelfHeal(
+        bestCode, project.contractName, buildDir, emit, project.id, { skipIdl: false },
+      );
+      compileLog.push(...final.log);
+      if (final.result.success) {
+        bestCode = final.code;
+        bestIdl = final.result.idl ?? bestIdl;
+        bestSo = final.result.soBase64;
+        bestRent = final.result.rentExemptLamports;
+        emit({ phase: "compiling", message: `Final compile succeeded: ${final.result.soSizeBytes} bytes${final.result.idl ? ", real IDL produced" : ""}.` });
+      } else {
+        // Fall back to the initial compiled .so; best code stays as the
+        // highest-scoring LLM output even if it didn't compile.
+        emit({ phase: "compiling", message: "Final compile failed; keeping initially compiled binary and best LLM IDL." });
+        bestSo = initialSo;
+      }
+    } else if (!toolchainUnavailable && bestCode === initial.code) {
+      // Code didn't change through hardening — run IDL build on the already
+      // compiled artefact rather than recompiling from scratch.
+      emit({ phase: "compiling", message: "Generating real IDL for compiled program..." });
+      const withIdl = await compileAnchorWithSelfHeal(
+        bestCode, project.contractName, buildDir, emit, project.id, { skipIdl: false },
+      );
+      compileLog.push(...withIdl.log);
+      if (withIdl.result.success) {
+        bestIdl = withIdl.result.idl ?? bestIdl;
+        bestSo = withIdl.result.soBase64 ?? bestSo;
+        bestRent = withIdl.result.rentExemptLamports ?? bestRent;
+      }
+    }
+
+    // ── Step 5: test generation ──────────────────────────────────────────────
     const testSuiteCode = await generateTestSuiteSafe(bestCode, project.contractName, "SOLANA", bestIdl, emit);
 
     const rentNote = bestRent != null
@@ -814,7 +818,9 @@ async function runSolanaPipeline(
         securityScore: bestScore,
         securityNotes: bestNotes,
         securityContextQuestion: bestContextQuestion,
-        compileLog: compileLog.join("\n\n"),
+        compileLog: toolchainUnavailable
+          ? "Anchor/cargo toolchain unavailable; hardening proceeded without a real rebuild."
+          : compileLog.join("\n\n"),
         testSuiteCode,
         gasNotes: rentNote ? `${bestGasNotes || ""}\n\n${rentNote}`.trim() : (bestGasNotes || null),
       })
