@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "Qd3TtnQhuFn9QE_hD3Mrl"
+uri = "file://.local/outputs/AURA-Forge-PreSeed-2026.pdf"
+type = "pdf"
+title = "AURA Forge — Pre-Seed Pitch Deck (PDF)"
