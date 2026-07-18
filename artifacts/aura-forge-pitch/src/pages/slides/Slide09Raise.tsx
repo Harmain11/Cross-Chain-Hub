@@ -96,23 +96,27 @@ export default function Slide09Raise() {
             <circle cx="160" cy="160" r="80" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="48" />
 
             {/* Animated donut segments */}
-            {segments.map((s, i) => (
-              <motion.circle
-                key={i}
-                cx="160" cy="160" r="80"
-                fill="none"
-                stroke={`url(#segGrad${i})`}
-                strokeWidth="44"
-                strokeDashoffset={s.dashOffset}
-                strokeLinecap="butt"
-                filter="url(#segGlow)"
-                transform="rotate(-90 160 160)"
-                initial={{ strokeDasharray: `0 ${C}` }}
-                animate={{ strokeDasharray: `${C * s.pct - 4} ${C}` }}
-                transition={{ duration: 1.0, delay: 0.6 + i * 0.18, ease: [0.22, 1, 0.36, 1] }}
-                style={{ opacity: 0.93 }}
-              />
-            ))}
+            {segments.map((s, i) => {
+              const finalDash = `${C * s.pct - 4} ${C}`;
+              return (
+                <motion.circle
+                  key={i}
+                  cx="160" cy="160" r="80"
+                  fill="none"
+                  stroke={`url(#segGrad${i})`}
+                  strokeWidth="44"
+                  strokeDashoffset={s.dashOffset}
+                  strokeLinecap="butt"
+                  filter="url(#segGlow)"
+                  transform="rotate(-90 160 160)"
+                  {...(isExport
+                    ? { initial: { strokeDasharray: finalDash }, animate: { strokeDasharray: finalDash } }
+                    : { initial: { strokeDasharray: `0 ${C}` }, animate: { strokeDasharray: finalDash }, transition: { duration: 1.0, delay: 0.6 + i * 0.18, ease: [0.22, 1, 0.36, 1] } }
+                  )}
+                  style={{ opacity: 0.93 }}
+                />
+              );
+            })}
 
             {/* Inner filled circle */}
             <circle cx="160" cy="160" r="53" fill="url(#innerGrad)" />
@@ -120,7 +124,7 @@ export default function Slide09Raise() {
             <circle cx="160" cy="160" r="53" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
 
             {/* Center text */}
-            <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.4 }}>
+            <motion.g {...(isExport ? { initial: { opacity: 1 }, animate: { opacity: 1 } } : { initial: { opacity: 0 }, animate: { opacity: 1 }, transition: { delay: 1.4 } })}>
               <text x="160" y="150" textAnchor="middle" fill="#F0F4FF"
                 fontFamily="Space Grotesk,sans-serif" fontSize="15" fontWeight="700">$1,000,000</text>
               <text x="160" y="170" textAnchor="middle" fill="#7A8BA0"
@@ -128,7 +132,7 @@ export default function Slide09Raise() {
             </motion.g>
 
             {/* Segment labels with glowing connector lines */}
-            <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.5 }}>
+            <motion.g {...(isExport ? { initial: { opacity: 1 }, animate: { opacity: 1 } } : { initial: { opacity: 0 }, animate: { opacity: 1 }, transition: { delay: 1.5 } })}>
               {/* Engineering 40% — top right */}
               <line x1="222" y1="82" x2="245" y2="65" stroke="rgba(0,194,255,0.4)" strokeWidth="1" />
               <circle cx="245" cy="65" r="2.5" fill="#00C2FF" opacity="0.7" />

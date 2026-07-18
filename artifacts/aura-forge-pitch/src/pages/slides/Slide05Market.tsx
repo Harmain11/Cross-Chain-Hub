@@ -124,9 +124,10 @@ export default function Slide05Market() {
                   stroke="url(#tamRingGrad)"
                   strokeWidth="1.5"
                   filter="url(#ringGlow)"
-                  initial={{ opacity: 0, scale: 0.5 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.8, delay: 0.4 }} />
+                  {...(isExport
+                    ? { initial: { opacity: 1, scale: 1 }, animate: { opacity: 1, scale: 1 } }
+                    : { initial: { opacity: 0, scale: 0.5 }, animate: { opacity: 1, scale: 1 }, transition: { duration: 0.8, delay: 0.4 } }
+                  )} />
 
                 {/* SAM ring */}
                 <motion.circle cx="190" cy="190" r="112"
@@ -134,9 +135,10 @@ export default function Slide05Market() {
                   stroke="url(#samRingGrad)"
                   strokeWidth="1.5"
                   filter="url(#ringGlow)"
-                  initial={{ opacity: 0, scale: 0.5 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.8, delay: 0.6 }} />
+                  {...(isExport
+                    ? { initial: { opacity: 1, scale: 1 }, animate: { opacity: 1, scale: 1 } }
+                    : { initial: { opacity: 0, scale: 0.5 }, animate: { opacity: 1, scale: 1 }, transition: { duration: 0.8, delay: 0.6 } }
+                  )} />
 
                 {/* SOM filled ring */}
                 <motion.circle cx="190" cy="190" r="64"
@@ -144,23 +146,26 @@ export default function Slide05Market() {
                   stroke="#00C2FF"
                   strokeWidth="2"
                   filter="url(#ringGlow)"
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.9, delay: 0.8, type: 'spring', stiffness: 120 }} />
+                  {...(isExport
+                    ? { initial: { opacity: 1, scale: 1 }, animate: { opacity: 1, scale: 1 } }
+                    : { initial: { opacity: 0, scale: 0 }, animate: { opacity: 1, scale: 1 }, transition: { duration: 0.9, delay: 0.8, type: 'spring', stiffness: 120 } }
+                  )} />
 
                 {/* Inner bright core */}
                 <motion.circle cx="190" cy="190" r="38"
                   fill="rgba(0,194,255,0.32)"
                   filter="url(#innerGlow)"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.6, delay: 1.0 }} />
+                  {...(isExport
+                    ? { initial: { opacity: 1 }, animate: { opacity: 1 } }
+                    : { initial: { opacity: 0 }, animate: { opacity: 1 }, transition: { duration: 0.6, delay: 1.0 } }
+                  )} />
 
                 <motion.circle cx="190" cy="190" r="18"
                   fill="rgba(0,194,255,0.7)"
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.5, delay: 1.1, type: 'spring' }} />
+                  {...(isExport
+                    ? { initial: { opacity: 1, scale: 1 }, animate: { opacity: 1, scale: 1 } }
+                    : { initial: { opacity: 0, scale: 0 }, animate: { opacity: 1, scale: 1 }, transition: { duration: 0.5, delay: 1.1, type: 'spring' } }
+                  )} />
 
                 {/* Pulsing dot at center */}
                 {!isExport && (
@@ -175,21 +180,21 @@ export default function Slide05Market() {
                 )}
 
                 {/* Labels — TAM */}
-                <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }}>
+                <motion.g {...(isExport ? { initial: { opacity: 1 }, animate: { opacity: 1 } } : { initial: { opacity: 0 }, animate: { opacity: 1 }, transition: { delay: 1.2 } })}>
                   <line x1="330" y1="85" x2="352" y2="62" stroke="rgba(0,194,255,0.3)" strokeWidth="1" />
                   <text x="356" y="58" fill="#7A8BA0" fontFamily="DM Sans,sans-serif" fontSize="12">TAM</text>
                   <text x="356" y="76" fill="#F0F4FF" fontFamily="Space Grotesk,sans-serif" fontSize="19" fontWeight="700">$12B</text>
                 </motion.g>
 
                 {/* SAM */}
-                <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.3 }}>
+                <motion.g {...(isExport ? { initial: { opacity: 1 }, animate: { opacity: 1 } } : { initial: { opacity: 0 }, animate: { opacity: 1 }, transition: { delay: 1.3 } })}>
                   <line x1="302" y1="190" x2="330" y2="190" stroke="rgba(0,194,255,0.3)" strokeWidth="1" />
                   <text x="334" y="186" fill="#7A8BA0" fontFamily="DM Sans,sans-serif" fontSize="12">SAM</text>
                   <text x="334" y="204" fill="#F0F4FF" fontFamily="Space Grotesk,sans-serif" fontSize="19" fontWeight="700">$3B</text>
                 </motion.g>
 
                 {/* SOM center */}
-                <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.4 }}>
+                <motion.g {...(isExport ? { initial: { opacity: 1 }, animate: { opacity: 1 } } : { initial: { opacity: 0 }, animate: { opacity: 1 }, transition: { delay: 1.4 } })}>
                   <text x="190" y="183" fill="#00C2FF" fontFamily="Space Grotesk,sans-serif" fontSize="12" fontWeight="600" textAnchor="middle">SOM</text>
                   <text x="190" y="202" fill="#F0F4FF" fontFamily="Space Grotesk,sans-serif" fontSize="20" fontWeight="800" textAnchor="middle">$120M</text>
                 </motion.g>

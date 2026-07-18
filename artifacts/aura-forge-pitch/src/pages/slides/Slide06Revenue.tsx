@@ -113,13 +113,13 @@ export default function Slide06Revenue() {
         </motion.div>
 
         {/* Beautiful area line chart */}
-        <motion.div {...anim({ opacity: 0, y: 18 }, { opacity: 1, y: 0 }, 0.62)} className="flex-1 flex flex-col">
+        <motion.div {...anim({ opacity: 0, y: 18 }, { opacity: 1, y: 0 }, 0.62)} className="flex-1 flex flex-col min-h-0 overflow-hidden">
           <div className="font-display font-semibold mb-[1vh]" style={{ fontSize: '1.05vw', color: '#7A8BA0', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             Projected ARR — 36 Month View
           </div>
 
-          <div className="flex-1 relative">
-            <svg viewBox="0 0 520 210" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+          <div className="flex-1 relative min-h-0">
+            <svg viewBox="0 0 520 210" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}>
               <defs>
                 {/* Area gradient */}
                 <linearGradient id="areaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -171,9 +171,10 @@ export default function Slide06Revenue() {
               <motion.path
                 d={areaPath}
                 fill="url(#areaGrad)"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.5, delay: 0.9 }}
+                {...(isExport
+                  ? { initial: { opacity: 1 }, animate: { opacity: 1 } }
+                  : { initial: { opacity: 0 }, animate: { opacity: 1 }, transition: { duration: 0.5, delay: 0.9 } }
+                )}
               />
 
               {/* Line */}
@@ -184,15 +185,19 @@ export default function Slide06Revenue() {
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                initial={{ pathLength: 0, opacity: 0 }}
-                animate={{ pathLength: 1, opacity: 1 }}
-                transition={{ pathLength: { duration: 1.8, delay: 0.7, ease: 'easeOut' }, opacity: { duration: 0.3, delay: 0.7 } }}
+                {...(isExport
+                  ? { initial: { pathLength: 1, opacity: 1 }, animate: { pathLength: 1, opacity: 1 } }
+                  : { initial: { pathLength: 0, opacity: 0 }, animate: { pathLength: 1, opacity: 1 }, transition: { pathLength: { duration: 1.8, delay: 0.7, ease: 'easeOut' }, opacity: { duration: 0.3, delay: 0.7 } } }
+                )}
               />
 
               {/* Milestone dots + labels */}
               {milestones.map(({ pt, label, value, color }, i) => (
-                <motion.g key={label} initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.4, delay: 1.8 + i * 0.15, type: 'spring' }}>
+                <motion.g key={label}
+                  {...(isExport
+                    ? { initial: { opacity: 1, scale: 1 }, animate: { opacity: 1, scale: 1 } }
+                    : { initial: { opacity: 0, scale: 0 }, animate: { opacity: 1, scale: 1 }, transition: { duration: 0.4, delay: 1.8 + i * 0.15, type: 'spring' } }
+                  )}>
                   {/* Outer ring */}
                   <circle cx={pt[0]} cy={pt[1]} r="8" fill="none" stroke={color} strokeWidth="1.5" opacity="0.5" filter="url(#dotGlow)" />
                   {/* Inner dot */}
