@@ -18,3 +18,9 @@ id = "ryaR_TAjAh39b8JQsNMu1"
 uri = "file://.local/outputs/AURA-Forge-PreSeed-2026-v3.pdf"
 type = "pdf"
 title = "AURA Forge — Pre-Seed 2026 v3"
+
+[[outputs]]
+id = "Gl1IWowZYiuoVllY7Z_x1"
+uri = "file://.local/outputs/AURA-Forge-PreSeed-2026-v4.pdf"
+type = "pdf"
+title = "AURA Forge — Pre-Seed 2026 v4"
