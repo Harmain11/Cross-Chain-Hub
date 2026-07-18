@@ -48,3 +48,9 @@ id = "eWUHouLkCwTdNXcGDZZEs"
 uri = "file://.local/outputs/AURA-Forge-PreSeed-2026-v8.pdf"
 type = "pdf"
 title = "AURA Forge — Pre-Seed 2026 v8 (11 slides)"
+
+[[outputs]]
+id = "82K4nC_2cFekP3bzoUDVV"
+uri = "file://.local/outputs/AURA-Forge-PreSeed-2026-v9.pdf"
+type = "pdf"
+title = "AURA Forge — Pre-Seed 2026 v9 (12 slides)"
