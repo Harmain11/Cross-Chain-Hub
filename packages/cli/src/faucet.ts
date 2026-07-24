@@ -178,10 +178,16 @@ export async function runFaucet(
       spinner.text = c.muted("Confirming airdrop transaction…");
       const { blockhash, lastValidBlockHeight } =
         await connection.getLatestBlockhash();
-      await connection.confirmTransaction(
+      const confirmResult = await connection.confirmTransaction(
         { signature: sig, blockhash, lastValidBlockHeight },
         "confirmed",
       );
+
+      if (confirmResult.value.err) {
+        throw new Error(
+          `On-chain transaction failed: ${JSON.stringify(confirmResult.value.err)}`,
+        );
+      }
 
       spinner.succeed(c.green("Airdrop confirmed"));
 

@@ -470,7 +470,49 @@ describe("runFaucet()", () => {
     });
   });
 
-  // ── 5. Solana rate-limit failure ────────────────────────────────────────────
+  // ── 5. Solana on-chain confirmation error ───────────────────────────────────
+  describe("SOLANA chain — confirmTransaction resolves with a non-null err", () => {
+    it("fails with an error message and does not show 'Airdrop confirmed'", async () => {
+      mockConfirmTransaction.mockResolvedValue({
+        value: { err: { InstructionError: [0, "Custom"] } },
+      });
+
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      await runFaucet("ValidBase58Key", "SOLANA");
+
+      // Spinner must show failure, not success
+      expect(mockSpinnerFail).toHaveBeenCalled();
+      expect(mockSpinnerSucceed).not.toHaveBeenCalledWith(
+        expect.stringContaining("Airdrop confirmed"),
+      );
+    });
+
+    it("includes the on-chain error detail in the output", async () => {
+      mockConfirmTransaction.mockResolvedValue({
+        value: { err: { InstructionError: [0, "Custom"] } },
+      });
+
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      await runFaucet("ValidBase58Key", "SOLANA");
+
+      // The error detail from confirmResult.value.err should appear somewhere
+      const allOutput = [
+        ...logs,
+        ...mockSpinnerFail.mock.calls.map((c) => c.join(" ")),
+      ].join("\n");
+      expect(allOutput).toMatch(/On-chain transaction failed|InstructionError/i);
+    });
+  });
+
+  // ── 6. Solana rate-limit failure ────────────────────────────────────────────
   describe("SOLANA chain — rate-limited airdrop", () => {
     const rateLimitMessages = [
       "HTTP 429: Too Many Requests",
