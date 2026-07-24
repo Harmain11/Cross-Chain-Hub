@@ -304,7 +304,7 @@ async function deployCommand(arg: string) {
   const balSpinner = ora({ text: c.muted("Checking wallet balance…"), indent: 2 }).start();
   try {
     if (project.ecosystem === "EVM") {
-      const bal = await getEvmBalance(walletKey);
+      const bal = await getEvmBalance(walletKey, undefined, (cfg as any).evmRpcUrl);
       if (bal) {
         const LOW_ETH = 0.01;
         const ethStr = bal.balanceEth.toFixed(6);
@@ -325,7 +325,7 @@ async function deployCommand(arg: string) {
         balSpinner.warn(c.gold("Could not fetch wallet balance — proceeding anyway."));
       }
     } else {
-      const bal = await getSolanaBalance(walletKey);
+      const bal = await getSolanaBalance(walletKey, undefined, (cfg as any).solRpcUrl);
       if (bal) {
         const LOW_SOL = 0.1;
         const solStr = bal.balanceSol.toFixed(6);
@@ -355,8 +355,8 @@ async function deployCommand(arg: string) {
   const deploySpinner = ora({ text: c.muted("Deploying…"), indent: 2 }).start();
   try {
     const result = project.ecosystem === "EVM"
-      ? await deployEvm(project, walletKey)
-      : await deploySolana(project, walletKey);
+      ? await deployEvm(project, walletKey, undefined, (cfg as any).evmRpcUrl)
+      : await deploySolana(project, walletKey, undefined, (cfg as any).solRpcUrl);
 
     deploySpinner.succeed(c.green("Deployed"));
 
@@ -400,7 +400,7 @@ async function balanceCommand() {
   const spinner = ora({ text: c.muted("Fetching wallet balance…"), indent: 2 }).start();
   try {
     if (chain === "EVM") {
-      const bal = await getEvmBalance(walletKey);
+      const bal = await getEvmBalance(walletKey, undefined, (cfg as any).evmRpcUrl);
       if (bal) {
         const ethStr = bal.balanceEth.toFixed(6);
         const LOW_ETH = 0.01;
@@ -414,7 +414,7 @@ async function balanceCommand() {
         spinner.fail(c.red("Could not fetch wallet balance."));
       }
     } else {
-      const bal = await getSolanaBalance(walletKey);
+      const bal = await getSolanaBalance(walletKey, undefined, (cfg as any).solRpcUrl);
       if (bal) {
         const solStr = bal.balanceSol.toFixed(6);
         const LOW_SOL = 0.1;
@@ -562,6 +562,58 @@ async function main() {
       (cfg as any).walletPrivateKey = key;
       console.log(`  ${c.green(icon.check)} Wallet key saved to ${c.muted("~/.aura-forge/config.json")}`);
       console.log(`  ${c.gold(icon.info)} Keep this file private — it contains your wallet key.`);
+      prompt();
+      return;
+    }
+
+    if (line.startsWith("/config rpc evm ")) {
+      const url = line.slice(16).trim();
+      saveConfig({ evmRpcUrl: url });
+      (cfg as any).evmRpcUrl = url;
+      console.log(`  ${c.green(icon.check)} EVM RPC URL saved  ${c.dim("→")} ${c.white(url)}`);
+      console.log(`  ${c.muted("This URL will be used for Sepolia deploys and balance checks.")}`);
+      prompt();
+      return;
+    }
+
+    if (line.startsWith("/config rpc sol ")) {
+      const url = line.slice(16).trim();
+      saveConfig({ solRpcUrl: url });
+      (cfg as any).solRpcUrl = url;
+      console.log(`  ${c.green(icon.check)} Solana RPC URL saved  ${c.dim("→")} ${c.white(url)}`);
+      console.log(`  ${c.muted("This URL will be used for Devnet deploys and balance checks.")}`);
+      prompt();
+      return;
+    }
+
+    if (line === "/config show") {
+      const evmEnv = process.env.AURA_FORGE_EVM_RPC_URL;
+      const solEnv = process.env.AURA_FORGE_SOL_RPC_URL;
+      const evmConfig = (cfg as any).evmRpcUrl as string | undefined;
+      const solConfig = (cfg as any).solRpcUrl as string | undefined;
+
+      const activeEvm = evmEnv ?? evmConfig ?? c.dim("(public fallback list)");
+      const activeSol = solEnv ?? solConfig ?? c.dim("(public fallback list)");
+
+      const srcEvm = evmEnv
+        ? c.muted("env var")
+        : evmConfig
+        ? c.muted("~/.aura-forge/config.json")
+        : c.dim("default");
+      const srcSol = solEnv
+        ? c.muted("env var")
+        : solConfig
+        ? c.muted("~/.aura-forge/config.json")
+        : c.dim("default");
+
+      console.log();
+      console.log(`  ${c.bold(c.white("Active RPC endpoints"))}`);
+      console.log();
+      console.log(`  ${c.cyan("EVM (Sepolia)")}  ${c.white(activeEvm)}  ${c.dim("·")}  ${srcEvm}`);
+      console.log(`  ${c.purple("SOL (Devnet) ")}  ${c.white(activeSol)}  ${c.dim("·")}  ${srcSol}`);
+      console.log();
+      console.log(`  ${c.muted("To change:")} ${c.cyan("/config rpc evm <url>")}  ${c.muted("or")}  ${c.cyan("/config rpc sol <url>")}`);
+      console.log();
       prompt();
       return;
     }

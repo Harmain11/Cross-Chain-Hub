@@ -96,6 +96,7 @@ export async function deployEvm(
   project: FullForgeProject,
   privateKey: string,
   rpcUrl?: string,
+  configRpcUrl?: string,
 ): Promise<DeployResult> {
   if (!project.compiledBytecode) {
     throw new Error(
@@ -138,9 +139,10 @@ export async function deployEvm(
       };
     });
 
-  // If the caller or env var provides a specific URL, use it directly.
-  if (rpcUrl ?? DEFAULT_EVM_RPC) {
-    return tryEvmUrl((rpcUrl ?? DEFAULT_EVM_RPC)!);
+  // Priority: explicit caller arg → env var → config file → public fallbacks.
+  const resolvedUrl = rpcUrl ?? DEFAULT_EVM_RPC ?? configRpcUrl ?? null;
+  if (resolvedUrl) {
+    return tryEvmUrl(resolvedUrl);
   }
 
   // Try each public fallback in order.
@@ -160,8 +162,8 @@ export async function deployEvm(
   throw new Error(
     "All public Sepolia RPC endpoints failed:\n" +
       errors.map((e) => `  • ${e}`).join("\n") +
-      "\n\nFix: set AURA_FORGE_EVM_RPC_URL to a private Infura or Alchemy endpoint:\n" +
-      "  export AURA_FORGE_EVM_RPC_URL=https://sepolia.infura.io/v3/<YOUR_KEY>",
+      "\n\nFix: use /config rpc evm <url> to set a private Infura or Alchemy endpoint,\n" +
+      "  or export AURA_FORGE_EVM_RPC_URL=https://sepolia.infura.io/v3/<YOUR_KEY>",
   );
 }
 
@@ -263,6 +265,7 @@ export async function deploySolana(
   project: FullForgeProject,
   walletKey: string,
   rpcUrl?: string,
+  configRpcUrl?: string,
 ): Promise<DeployResult> {
   if (!project.compiledBytecode) {
     throw new Error(
@@ -271,9 +274,10 @@ export async function deploySolana(
     );
   }
 
-  // If the caller or env var provides a specific URL, use it directly.
-  if (rpcUrl ?? DEFAULT_SOL_RPC) {
-    return deploySolanaWithRpc(project, walletKey, (rpcUrl ?? DEFAULT_SOL_RPC)!);
+  // Priority: explicit caller arg → env var → config file → public fallbacks.
+  const resolvedUrl = rpcUrl ?? DEFAULT_SOL_RPC ?? configRpcUrl ?? null;
+  if (resolvedUrl) {
+    return deploySolanaWithRpc(project, walletKey, resolvedUrl);
   }
 
   // Try each public fallback in order.  deploySolanaWithRpc already applies
@@ -294,8 +298,8 @@ export async function deploySolana(
   throw new Error(
     "All public Solana devnet RPC endpoints failed:\n" +
       errors.map((e) => `  • ${e}`).join("\n") +
-      "\n\nFix: set AURA_FORGE_SOL_RPC_URL to a private Helius or QuickNode devnet endpoint:\n" +
-      "  export AURA_FORGE_SOL_RPC_URL=https://devnet.helius-rpc.com/?api-key=<YOUR_KEY>",
+      "\n\nFix: use /config rpc sol <url> to set a private Helius or QuickNode devnet endpoint,\n" +
+      "  or export AURA_FORGE_SOL_RPC_URL=https://devnet.helius-rpc.com/?api-key=<YOUR_KEY>",
   );
 }
 
@@ -320,6 +324,7 @@ export type EvmBalanceResult = {
 export async function getEvmBalance(
   privateKey: string,
   rpcUrl?: string,
+  configRpcUrl?: string,
 ): Promise<EvmBalanceResult | null> {
   try {
     const { ethers } = await import("ethers");
@@ -333,11 +338,9 @@ export async function getEvmBalance(
       return null;
     }
 
-    const urls = rpcUrl
-      ? [rpcUrl]
-      : DEFAULT_EVM_RPC
-      ? [DEFAULT_EVM_RPC, ...EVM_RPC_FALLBACKS]
-      : EVM_RPC_FALLBACKS;
+    // Priority: explicit arg → env var → config file → public fallbacks.
+    const pinned = rpcUrl ?? DEFAULT_EVM_RPC ?? configRpcUrl ?? null;
+    const urls = pinned ? [pinned, ...EVM_RPC_FALLBACKS] : EVM_RPC_FALLBACKS;
 
     for (const url of urls) {
       try {
@@ -371,6 +374,7 @@ export type SolanaBalanceResult = {
 export async function getSolanaBalance(
   walletKey: string,
   rpcUrl?: string,
+  configRpcUrl?: string,
 ): Promise<SolanaBalanceResult | null> {
   try {
     const { Connection, LAMPORTS_PER_SOL } = await import("@solana/web3.js");
@@ -386,11 +390,9 @@ export async function getSolanaBalance(
       return null;
     }
 
-    const urls = rpcUrl
-      ? [rpcUrl]
-      : DEFAULT_SOL_RPC
-      ? [DEFAULT_SOL_RPC, ...SOL_RPC_FALLBACKS]
-      : SOL_RPC_FALLBACKS;
+    // Priority: explicit arg → env var → config file → public fallbacks.
+    const pinned = rpcUrl ?? DEFAULT_SOL_RPC ?? configRpcUrl ?? null;
+    const urls = pinned ? [pinned, ...SOL_RPC_FALLBACKS] : SOL_RPC_FALLBACKS;
 
     for (const url of urls) {
       try {

@@ -77,17 +77,20 @@ export function printHelp(): void {
   console.log(`  ${c.bold(c.white("Commands"))}`);
   console.log();
   const cmds: [string, string][] = [
-    ["/audit <file>",       "Audit an existing .sol or .rs contract in your workspace"],
-    ["/deploy <project-id>","Deploy a forged contract to Sepolia (EVM) or Devnet (Solana)"],
-    ["/balance",            "Show current wallet balance (SOL/ETH) without triggering an airdrop"],
-    ["/faucet",             "Fund your testnet wallet (EVM: prints faucet links; Solana: airdrops 1 SOL)"],
-    ["/list",               "List all contracts found in the current workspace"],
-    ["/chain [evm|solana]", "Switch default chain (current session)"],
-    ["/wallet <key>",       "Set wallet private key for deployments (saved to config)"],
-    ["/save <path>",        "Set output directory for generated contracts"],
-    ["/key <api-key>",      "Paste an API key directly (or run aura-forge login instead)"],
-    ["/help",               "Show this help"],
-    ["/exit",               "Quit"],
+    ["/audit <file>",            "Audit an existing .sol or .rs contract in your workspace"],
+    ["/deploy <project-id>",     "Deploy a forged contract to Sepolia (EVM) or Devnet (Solana)"],
+    ["/balance",                 "Show current wallet balance (SOL/ETH) without triggering an airdrop"],
+    ["/faucet",                  "Fund your testnet wallet (EVM: prints faucet links; Solana: airdrops 1 SOL)"],
+    ["/list",                    "List all contracts found in the current workspace"],
+    ["/chain [evm|solana]",      "Switch default chain (current session)"],
+    ["/wallet <key>",            "Set wallet private key for deployments (saved to config)"],
+    ["/config rpc evm <url>",    "Set a custom Sepolia RPC URL (saved to config; below env var in priority)"],
+    ["/config rpc sol <url>",    "Set a custom Solana Devnet RPC URL (saved to config; below env var)"],
+    ["/config show",             "Show currently active RPC endpoints for each chain"],
+    ["/save <path>",             "Set output directory for generated contracts"],
+    ["/key <api-key>",           "Paste an API key directly (or run aura-forge login instead)"],
+    ["/help",                    "Show this help"],
+    ["/exit",                    "Quit"],
   ];
   for (const [cmd, desc] of cmds) {
     console.log(`  ${c.cyan(cmd.padEnd(28))} ${c.muted(desc)}`);

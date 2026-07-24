@@ -10,6 +10,16 @@ export interface AuraConfig {
   defaultChain: "EVM" | "SOLANA";
   /** Private key for testnet deployments. EVM: hex key. Solana: JSON byte-array or base58. */
   walletPrivateKey?: string;
+  /**
+   * Custom Sepolia RPC URL saved interactively via `/config rpc evm <url>`.
+   * Priority: AURA_FORGE_EVM_RPC_URL env var > this field > public fallbacks.
+   */
+  evmRpcUrl?: string;
+  /**
+   * Custom Solana devnet RPC URL saved interactively via `/config rpc sol <url>`.
+   * Priority: AURA_FORGE_SOL_RPC_URL env var > this field > public fallbacks.
+   */
+  solRpcUrl?: string;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".aura-forge");
