@@ -76,8 +76,11 @@ const DEFAULT_SOL_RPC =
  * Accepts:
  *   - JSON array of bytes (from `solana-keygen new --outfile key.json`)
  *   - base58-encoded secret key (64 bytes)
+ *
+ * Exported so other modules (e.g. the CLI REPL /faucet command) can derive
+ * a public key without duplicating the parsing logic.
  */
-async function parseSolanaKeypair(raw: string) {
+export async function parseSolanaKeypair(raw: string) {
   const { Keypair } = await import("@solana/web3.js");
 
   // Try JSON array first

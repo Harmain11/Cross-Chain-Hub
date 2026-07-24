@@ -79,6 +79,7 @@ export function printHelp(): void {
   const cmds: [string, string][] = [
     ["/audit <file>",       "Audit an existing .sol or .rs contract in your workspace"],
     ["/deploy <project-id>","Deploy a forged contract to Sepolia (EVM) or Devnet (Solana)"],
+    ["/faucet",             "Fund your testnet wallet (EVM: prints faucet links; Solana: airdrops 1 SOL)"],
     ["/list",               "List all contracts found in the current workspace"],
     ["/chain [evm|solana]", "Switch default chain (current session)"],
     ["/wallet <key>",       "Set wallet private key for deployments (saved to config)"],

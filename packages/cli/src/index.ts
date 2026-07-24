@@ -322,6 +322,100 @@ async function deployCommand(arg: string) {
   }
 }
 
+// ─── /faucet command ───────────────────────────────────────────────────────────
+async function faucetCommand() {
+  const walletKey = resolveWalletKey(cfg.walletPrivateKey);
+  if (!walletKey) {
+    console.log();
+    console.log(`  ${c.red(icon.cross)} No wallet key configured.`);
+    console.log(`  ${c.muted("Set one with")} ${c.cyan("/wallet <key>")} ${c.muted("then run")} ${c.cyan("/faucet")} ${c.muted("again.")}`);
+    return;
+  }
+
+  if (chain === "EVM") {
+    // ── Sepolia: derive address and print faucet links ──────────────────────
+    const spinner = ora({ text: c.muted("Deriving wallet address…"), indent: 2 }).start();
+    try {
+      const { ethers } = await import("ethers");
+      const wallet = new ethers.Wallet(walletKey);
+      const address = wallet.address;
+      spinner.stop();
+
+      console.log();
+      console.log(`  ${c.cyan(icon.forge)} ${c.bold(c.white("Sepolia Faucet"))}  ${c.dim("·")}  ${c.cyan("EVM")}`);
+      console.log();
+      console.log(`  ${c.green(icon.check)} Wallet address  ${c.white(address)}`);
+      console.log();
+      console.log(`  ${c.muted("Fund this address at one of the faucets below:")}`);
+      console.log();
+      console.log(`  ${c.dim(icon.dot)} ${c.cyan("https://sepoliafaucet.com")}`);
+      console.log(`  ${c.dim(icon.dot)} ${c.cyan("https://www.alchemy.com/faucets/ethereum-sepolia")}`);
+      console.log(`  ${c.dim(icon.dot)} ${c.cyan("https://faucet.quicknode.com/ethereum/sepolia")}`);
+      console.log();
+      console.log(`  ${c.muted("Copy your address above, paste it into any faucet, and request test ETH.")}`);
+      console.log(`  ${c.muted("Once funded, run")} ${c.cyan("/deploy <project-id>")} ${c.muted("to deploy your contract.")}`);
+
+      // Also fetch and show current balance if possible
+      const rpcUrl = process.env.AURA_FORGE_EVM_RPC_URL ?? "https://rpc2.sepolia.org";
+      const balSpinner = ora({ text: c.muted("Checking current balance…"), indent: 2 }).start();
+      try {
+        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        const bal = await provider.getBalance(address);
+        const ethBal = ethers.formatEther(bal);
+        balSpinner.succeed(c.dim(`Current balance: ${c.white(parseFloat(ethBal).toFixed(6))} ETH (Sepolia)`));
+      } catch {
+        balSpinner.stop();
+        // Non-fatal — balance check failed, just skip it
+      }
+    } catch (err) {
+      spinner.fail(c.red(`Could not derive wallet address: ${err instanceof Error ? err.message : err}`));
+    }
+
+  } else {
+    // ── Devnet: request 1 SOL airdrop directly ──────────────────────────────
+    const spinner = ora({ text: c.muted("Requesting 1 SOL airdrop from Devnet…"), indent: 2 }).start();
+    try {
+      const { Connection, LAMPORTS_PER_SOL } = await import("@solana/web3.js");
+      const { parseSolanaKeypair } = await import("./deploy.js");
+      const keypair = await parseSolanaKeypair(walletKey);
+      const address = keypair.publicKey.toBase58();
+
+      const rpcUrl = process.env.AURA_FORGE_SOL_RPC_URL ?? "https://api.devnet.solana.com";
+      const connection = new Connection(rpcUrl, "confirmed");
+
+      spinner.text = c.muted(`Airdropping 1 SOL to ${address.slice(0, 8)}…`);
+      const sig = await connection.requestAirdrop(keypair.publicKey, LAMPORTS_PER_SOL);
+
+      // Confirm the transaction
+      spinner.text = c.muted("Confirming airdrop transaction…");
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+
+      // Fetch resulting balance
+      const lamports = await connection.getBalance(keypair.publicKey);
+      const sol = lamports / LAMPORTS_PER_SOL;
+
+      spinner.succeed(c.green("Airdrop confirmed"));
+
+      console.log();
+      console.log(`  ${c.purple(icon.solana)} ${c.bold(c.white("Solana Devnet Airdrop"))}  ${c.dim("·")}  ${c.purple("Devnet")}`);
+      console.log();
+      console.log(`  ${c.green(icon.check)} Wallet address    ${c.white(address)}`);
+      console.log(`  ${c.green(icon.check)} Airdrop amount    ${c.white("1 SOL")}`);
+      console.log(`  ${c.green(icon.check)} New balance       ${c.white(sol.toFixed(6))} SOL`);
+      console.log(`  ${c.dim("Explorer →")}  ${c.cyan(`https://explorer.solana.com/tx/${sig}?cluster=devnet`)}`);
+      console.log();
+      console.log(`  ${c.muted("Run")} ${c.cyan("/faucet")} ${c.muted("again if you need more SOL (airdrop limit: 2 SOL per request).")}`);
+
+    } catch (err) {
+      spinner.fail(c.red(`Airdrop failed: ${err instanceof Error ? err.message : err}`));
+      console.log();
+      console.log(`  ${c.muted("Devnet faucet rate-limits requests. Try again in a minute, or visit:")}`);
+      console.log(`  ${c.dim(icon.dot)} ${c.cyan("https://faucet.solana.com")}`);
+    }
+  }
+}
+
 // ─── /list command ─────────────────────────────────────────────────────────────
 function listWorkspace() {
   console.log();
@@ -426,6 +520,12 @@ async function main() {
       (cfg as any).walletPrivateKey = key;
       console.log(`  ${c.green(icon.check)} Wallet key saved to ${c.muted("~/.aura-forge/config.json")}`);
       console.log(`  ${c.gold(icon.info)} Keep this file private — it contains your wallet key.`);
+      prompt();
+      return;
+    }
+
+    if (line === "/faucet") {
+      await faucetCommand();
       prompt();
       return;
     }
