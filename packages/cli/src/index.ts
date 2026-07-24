@@ -29,6 +29,13 @@ const flagVal = (flag: string) => {
   return i !== -1 ? args[i + 1] : undefined;
 };
 
+// ─── Address abbreviation helper ──────────────────────────────────────────────
+/** Show first 8 + last 4 chars of an address, e.g. 0x1a2b3c4d…ef01 */
+function abbrevAddress(addr: string): string {
+  if (addr.length <= 12) return addr;
+  return addr.slice(0, 8) + "…" + addr.slice(-4);
+}
+
 // ─── Top-level subcommands (run and exit) ──────────────────────────────────────
 const subcommand = args[0];
 
@@ -301,9 +308,10 @@ async function deployCommand(arg: string) {
       if (bal) {
         const LOW_ETH = 0.01;
         const ethStr = bal.balanceEth.toFixed(6);
+        const addrStr = c.muted(abbrevAddress(bal.address));
         if (bal.balanceEth < LOW_ETH) {
           balSpinner.warn(
-            c.gold(`Wallet balance: ${c.white(ethStr + " ETH")} (Sepolia)  ${c.dim("—")}  low funds`),
+            c.gold(`${addrStr}  ${c.white(ethStr + " ETH")} (Sepolia)  ${c.dim("—")}  low funds`),
           );
           console.log(
             `  ${c.gold(icon.info)} Balance is below ${LOW_ETH} ETH. ` +
@@ -311,7 +319,7 @@ async function deployCommand(arg: string) {
           );
           console.log(`  ${c.muted("Continuing anyway — the deploy may fail if funds are insufficient.")}`);
         } else {
-          balSpinner.succeed(c.dim(`Wallet balance: ${c.white(ethStr + " ETH")} (Sepolia)`));
+          balSpinner.succeed(c.dim(`${addrStr}  ${c.white(ethStr + " ETH")} (Sepolia)`));
         }
       } else {
         balSpinner.warn(c.gold("Could not fetch wallet balance — proceeding anyway."));
@@ -321,9 +329,10 @@ async function deployCommand(arg: string) {
       if (bal) {
         const LOW_SOL = 0.1;
         const solStr = bal.balanceSol.toFixed(6);
+        const addrStr = c.muted(abbrevAddress(bal.address));
         if (bal.balanceSol < LOW_SOL) {
           balSpinner.warn(
-            c.gold(`Wallet balance: ${c.white(solStr + " SOL")} (Devnet)  ${c.dim("—")}  low funds`),
+            c.gold(`${addrStr}  ${c.white(solStr + " SOL")} (Devnet)  ${c.dim("—")}  low funds`),
           );
           console.log(
             `  ${c.gold(icon.info)} Balance is below ${LOW_SOL} SOL. ` +
@@ -331,7 +340,7 @@ async function deployCommand(arg: string) {
           );
           console.log(`  ${c.muted("Continuing anyway — the deploy may fail if funds are insufficient.")}`);
         } else {
-          balSpinner.succeed(c.dim(`Wallet balance: ${c.white(solStr + " SOL")} (Devnet)`));
+          balSpinner.succeed(c.dim(`${addrStr}  ${c.white(solStr + " SOL")} (Devnet)`));
         }
       } else {
         balSpinner.warn(c.gold("Could not fetch wallet balance — proceeding anyway."));
