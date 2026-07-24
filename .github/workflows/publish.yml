@@ -51,6 +51,9 @@ jobs:
       - name: Build MCP
         run: pnpm --filter @aura-forge/mcp run build
 
+      # Both builds must succeed before either package is published.
+      # If either step above fails, the job stops here and nothing is published.
+
       - name: Publish CLI
         run: pnpm --filter @aura-forge/cli publish --no-git-checks
         env:
