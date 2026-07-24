@@ -159,3 +159,74 @@ describe("runSignup() error paths", () => {
     expect(allOutput).toMatch(/check your network/i);
   });
 });
+
+describe("runLogin() error paths", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _rlIdx = 0;
+    _rlResponses = [];
+    // Re-assign chainable stubs after clearAllMocks
+    spinnerStub.start = vi.fn().mockReturnThis();
+    spinnerStub.succeed = vi.fn().mockReturnThis();
+    spinnerStub.fail = vi.fn().mockReturnThis();
+    spinnerStub.warn = vi.fn().mockReturnThis();
+    // Ensure non-TTY so readPassword falls back to readline (no raw mode)
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: false,
+      configurable: true,
+    });
+  });
+
+  // ── 1. Wrong credentials (401) ──────────────────────────────────────────────
+  it("surfaces a clear message for wrong credentials (401)", async () => {
+    setInputs("user@example.com", "wrongpassword");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: "Invalid email or password" }),
+        headers: { get: () => null },
+      })),
+    );
+
+    const cap = captureConsole();
+    const { runLogin } = await import("./login.js");
+    await runLogin("http://localhost:3000");
+    cap.restore();
+
+    // Spinner must show the server error message, not a raw HTTP status
+    const failArgs = (spinnerStub.fail as Mock).mock.calls.flat().join(" ");
+    expect(failArgs).toMatch(/invalid email or password/i);
+    // Must not expose raw exception internals
+    expect(failArgs).not.toMatch(/TypeError|at runLogin|node:internal/);
+  });
+
+  // ── 2. API server unreachable ───────────────────────────────────────────────
+  it("shows a readable message when the server cannot be reached", async () => {
+    setInputs("user@example.com", "Password123!");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+
+    const cap = captureConsole();
+    const { runLogin } = await import("./login.js");
+    await runLogin("http://localhost:3000");
+    cap.restore();
+
+    // Spinner fail message must NOT expose a raw TypeError stack
+    const failArgs = (spinnerStub.fail as Mock).mock.calls.flat().join(" ");
+    expect(failArgs).not.toMatch(/TypeError|at runLogin|node:internal/);
+    // Must be human-readable
+    expect(failArgs).toMatch(/could not reach/i);
+
+    // Extra hint should appear in console output
+    const allOutput = cap.lines.join("\n");
+    expect(allOutput).toMatch(/check your network/i);
+  });
+});
