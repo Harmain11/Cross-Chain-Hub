@@ -30,6 +30,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify npm authentication
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not set. Add it to your repository secrets before releasing."
+            exit 1
+          fi
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          if ! npm whoami --registry https://registry.npmjs.org/ 2>&1; then
+            echo "::error::npm authentication failed. The NPM_TOKEN may be expired, revoked, or missing publish permissions."
+            exit 1
+          fi
+          echo "npm auth OK — token is valid."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Build CLI
         run: pnpm --filter @aura-forge/cli run build
 
