@@ -18,7 +18,7 @@ import {
   type Chain,
   type ForgeEvent,
 } from "./forge.js";
-import { deployEvm, deploySolana, resolveWalletKey } from "./deploy.js";
+import { deployEvm, deploySolana, resolveWalletKey, getEvmBalance, getSolanaBalance } from "./deploy.js";
 import { runLogin, runLogout, runSignup } from "./login.js";
 
 // ─── CLI flags ─────────────────────────────────────────────────────────────────
@@ -290,6 +290,56 @@ async function deployCommand(arg: string) {
 
   const networkLabel = project.ecosystem === "EVM" ? c.cyan("Sepolia") : c.purple("Devnet");
   console.log(`  ${c.cyan(icon.forge)} ${c.bold(c.white(project.contractName))}  ${c.dim("·")}  Deploying to ${networkLabel}`);
+  console.log();
+
+  // ── Balance check (non-blocking) ───────────────────────────────────────────
+  const balSpinner = ora({ text: c.muted("Checking wallet balance…"), indent: 2 }).start();
+  try {
+    if (project.ecosystem === "EVM") {
+      const bal = await getEvmBalance(walletKey);
+      if (bal) {
+        const LOW_ETH = 0.01;
+        const ethStr = bal.balanceEth.toFixed(6);
+        if (bal.balanceEth < LOW_ETH) {
+          balSpinner.warn(
+            c.gold(`Wallet balance: ${c.white(ethStr + " ETH")} (Sepolia)  ${c.dim("—")}  low funds`),
+          );
+          console.log(
+            `  ${c.gold(icon.info)} Balance is below ${LOW_ETH} ETH. ` +
+            `Run ${c.cyan("/faucet")} to top up before deploying.`,
+          );
+          console.log(`  ${c.muted("Continuing anyway — the deploy may fail if funds are insufficient.")}`);
+        } else {
+          balSpinner.succeed(c.dim(`Wallet balance: ${c.white(ethStr + " ETH")} (Sepolia)`));
+        }
+      } else {
+        balSpinner.warn(c.gold("Could not fetch wallet balance — proceeding anyway."));
+      }
+    } else {
+      const bal = await getSolanaBalance(walletKey);
+      if (bal) {
+        const LOW_SOL = 0.1;
+        const solStr = bal.balanceSol.toFixed(6);
+        if (bal.balanceSol < LOW_SOL) {
+          balSpinner.warn(
+            c.gold(`Wallet balance: ${c.white(solStr + " SOL")} (Devnet)  ${c.dim("—")}  low funds`),
+          );
+          console.log(
+            `  ${c.gold(icon.info)} Balance is below ${LOW_SOL} SOL. ` +
+            `Run ${c.cyan("/faucet")} to top up before deploying.`,
+          );
+          console.log(`  ${c.muted("Continuing anyway — the deploy may fail if funds are insufficient.")}`);
+        } else {
+          balSpinner.succeed(c.dim(`Wallet balance: ${c.white(solStr + " SOL")} (Devnet)`));
+        }
+      } else {
+        balSpinner.warn(c.gold("Could not fetch wallet balance — proceeding anyway."));
+      }
+    }
+  } catch {
+    // Defensive: any unexpected error in the balance check must not abort the deploy
+    balSpinner.warn(c.gold("Could not fetch wallet balance — proceeding anyway."));
+  }
   console.log();
 
   const deploySpinner = ora({ text: c.muted("Deploying…"), indent: 2 }).start();

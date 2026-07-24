@@ -243,3 +243,105 @@ export async function deploySolana(
 export function resolveWalletKey(configKey?: string): string | undefined {
   return process.env.AURA_FORGE_WALLET_KEY ?? configKey;
 }
+
+// ─── Balance helpers ──────────────────────────────────────────────────────────
+
+export type EvmBalanceResult = {
+  address: string;
+  balanceEth: number;
+};
+
+/**
+ * Fetch the Sepolia ETH balance for the given private key.
+ * Tries the env-var RPC first, then the public fallback list.
+ * Never throws — returns null if all RPCs fail.
+ */
+export async function getEvmBalance(
+  privateKey: string,
+  rpcUrl?: string,
+): Promise<EvmBalanceResult | null> {
+  try {
+    const { ethers } = await import("ethers");
+
+    let address: string;
+    try {
+      const wallet = new ethers.Wallet(privateKey);
+      address = wallet.address;
+    } catch {
+      // Invalid key format — cannot derive address, skip balance check
+      return null;
+    }
+
+    const urls = rpcUrl
+      ? [rpcUrl]
+      : DEFAULT_EVM_RPC
+      ? [DEFAULT_EVM_RPC, ...EVM_RPC_FALLBACKS]
+      : EVM_RPC_FALLBACKS;
+
+    for (const url of urls) {
+      try {
+        const provider = new ethers.JsonRpcProvider(url);
+        const bal = await provider.getBalance(address);
+        const balanceEth = parseFloat(ethers.formatEther(bal));
+        return { address, balanceEth };
+      } catch {
+        // try next
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export type SolanaBalanceResult = {
+  address: string;
+  balanceSol: number;
+};
+
+/**
+ * Fetch the Devnet SOL balance for the given wallet key.
+ * Tries the env-var RPC first, then the public fallback list.
+ * Never throws — returns null if all RPCs fail.
+ */
+export async function getSolanaBalance(
+  walletKey: string,
+  rpcUrl?: string,
+): Promise<SolanaBalanceResult | null> {
+  try {
+    const { Connection, LAMPORTS_PER_SOL } = await import("@solana/web3.js");
+
+    let address: string;
+    let publicKey: Awaited<ReturnType<typeof parseSolanaKeypair>>["publicKey"];
+    try {
+      const keypair = await parseSolanaKeypair(walletKey);
+      address = keypair.publicKey.toBase58();
+      publicKey = keypair.publicKey;
+    } catch {
+      // Invalid key format — cannot derive address, skip balance check
+      return null;
+    }
+
+    const urls = rpcUrl
+      ? [rpcUrl]
+      : DEFAULT_SOL_RPC
+      ? [DEFAULT_SOL_RPC, ...SOL_RPC_FALLBACKS]
+      : SOL_RPC_FALLBACKS;
+
+    for (const url of urls) {
+      try {
+        const connection = new Connection(url, "confirmed");
+        const lamports = await connection.getBalance(publicKey);
+        const balanceSol = lamports / LAMPORTS_PER_SOL;
+        return { address, balanceSol };
+      } catch {
+        // try next
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
