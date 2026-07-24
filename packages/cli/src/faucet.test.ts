@@ -1,0 +1,316 @@
+/**
+ * Unit tests for runFaucet() — the /faucet command implementation.
+ *
+ * Verified behaviours:
+ *  1. No wallet key configured → prints error, returns without touching ethers/web3
+ *  2. EVM chain: derives address via ethers.Wallet and prints faucet links
+ *  3. Solana chain: successful airdrop + confirmation → prints balance
+ *  4. Solana chain: rate-limited airdrop error → rate-limit message + faucet.solana.com link
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// ── ora mock (spinner) ────────────────────────────────────────────────────────
+// Must be hoisted before any module that imports ora.
+const mockSpinnerStop = vi.fn();
+const mockSpinnerFail = vi.fn();
+const mockSpinnerSucceed = vi.fn();
+const mockSpinner = {
+  start: vi.fn().mockReturnThis(),
+  stop: mockSpinnerStop,
+  fail: mockSpinnerFail,
+  succeed: mockSpinnerSucceed,
+  set text(_: string) {},
+};
+
+vi.mock("ora", () => ({
+  default: vi.fn(() => mockSpinner),
+}));
+
+// ── chalk / ui mock ───────────────────────────────────────────────────────────
+// Keep the output readable in tests without ANSI codes.
+vi.mock("./ui.js", () => ({
+  c: new Proxy(
+    {},
+    {
+      get:
+        () =>
+        (s: unknown) =>
+          String(s),
+    },
+  ),
+  icon: {
+    cross: "✗",
+    check: "✓",
+    forge: "⬡",
+    dot: "·",
+    solana: "◎",
+    info: "ℹ",
+  },
+  banner: vi.fn(),
+  phaseLine: vi.fn(),
+  printHelp: vi.fn(),
+  scoreBar: vi.fn(),
+  header: vi.fn(),
+}));
+
+// ── ethers mock ───────────────────────────────────────────────────────────────
+const mockEthersGetBalance = vi.fn();
+const mockEthersWalletCtor = vi.fn();
+
+vi.mock("ethers", () => ({
+  ethers: {
+    Wallet: class {
+      address: string;
+      constructor(pk: string) {
+        mockEthersWalletCtor(pk);
+        if (pk === "INVALID_EVM_KEY") throw new Error("invalid private key");
+        this.address = "0xDeAdBeEf1234";
+      }
+    },
+    JsonRpcProvider: class {
+      getBalance = mockEthersGetBalance;
+    },
+    formatEther: (n: bigint) => String(Number(n) / 1e18),
+  },
+}));
+
+// ── @solana/web3.js mock ──────────────────────────────────────────────────────
+const mockRequestAirdrop = vi.fn();
+const mockGetLatestBlockhash = vi.fn();
+const mockConfirmTransaction = vi.fn();
+const mockSolGetBalance = vi.fn();
+
+vi.mock("@solana/web3.js", () => ({
+  Connection: class {
+    constructor() {}
+    requestAirdrop = mockRequestAirdrop;
+    getLatestBlockhash = mockGetLatestBlockhash;
+    confirmTransaction = mockConfirmTransaction;
+    getBalance = mockSolGetBalance;
+  },
+  LAMPORTS_PER_SOL: 1_000_000_000,
+  Keypair: {
+    fromSecretKey: (_bytes: Uint8Array) => ({
+      publicKey: { toBase58: () => "SoLaNaWaLLet1111" },
+    }),
+  },
+  BpfLoader: {},
+  BPF_LOADER_PROGRAM_ID: "",
+}));
+
+// ── bs58 mock ─────────────────────────────────────────────────────────────────
+vi.mock("bs58", () => ({
+  default: {
+    decode: (s: string) => {
+      if (s === "INVALID_BASE58") throw new Error("bad base58");
+      return new Uint8Array(64);
+    },
+  },
+}));
+
+// ── deploy.js mock (parseSolanaKeypair) ───────────────────────────────────────
+vi.mock("./deploy.js", () => ({
+  parseSolanaKeypair: async (raw: string) => {
+    if (raw === "INVALID_SOL_KEY") throw new Error("Could not parse Solana wallet key.");
+    return {
+      publicKey: { toBase58: () => "SoLaNaWaLLet1111" },
+    };
+  },
+  resolveWalletKey: (configKey?: string) =>
+    process.env.AURA_FORGE_WALLET_KEY ?? configKey,
+  deployEvm: vi.fn(),
+  deploySolana: vi.fn(),
+  getEvmBalance: vi.fn(),
+  getSolanaBalance: vi.fn(),
+}));
+
+// ── forge.js mock (Chain type referenced at runtime) ─────────────────────────
+vi.mock("./forge.js", () => ({
+  createForgeJob: vi.fn(),
+  streamForgeJob: vi.fn(),
+  listProjects: vi.fn(),
+  deriveContractName: vi.fn(),
+  getProject: vi.fn(),
+  recordDeployment: vi.fn(),
+}));
+
+// ── Subject under test ────────────────────────────────────────────────────────
+const { runFaucet } = await import("./faucet.js");
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("runFaucet()", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Re-arm the spinner mock (clearAllMocks resets mockReturnThis)
+    mockSpinner.start.mockReturnThis();
+
+    // Default successful airdrop mocks
+    mockRequestAirdrop.mockResolvedValue("airdrop-sig-abc123");
+    mockGetLatestBlockhash.mockResolvedValue({
+      blockhash: "blockhash123",
+      lastValidBlockHeight: 999,
+    });
+    mockConfirmTransaction.mockResolvedValue({ value: { err: null } });
+    mockSolGetBalance.mockResolvedValue(2_000_000_000); // 2 SOL
+
+    // Default EVM balance mock
+    mockEthersGetBalance.mockResolvedValue(BigInt(5e16)); // 0.05 ETH
+  });
+
+  // ── 1. No wallet key ────────────────────────────────────────────────────────
+  describe("when no wallet key is configured", () => {
+    it("prints an error message and returns without calling ethers or web3", async () => {
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      await runFaucet(undefined, "EVM");
+
+      expect(logs.some((l) => l.includes("No wallet key configured"))).toBe(true);
+      expect(mockEthersWalletCtor).not.toHaveBeenCalled();
+      expect(mockRequestAirdrop).not.toHaveBeenCalled();
+    });
+
+    it("works the same way on the SOLANA chain", async () => {
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      await runFaucet(undefined, "SOLANA");
+
+      expect(logs.some((l) => l.includes("No wallet key configured"))).toBe(true);
+      expect(mockRequestAirdrop).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── 2. EVM address derivation ───────────────────────────────────────────────
+  describe("EVM chain with a valid private key", () => {
+    it("derives the wallet address and prints faucet links", async () => {
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      await runFaucet("0x" + "a".repeat(64), "EVM");
+
+      expect(mockEthersWalletCtor).toHaveBeenCalledWith("0x" + "a".repeat(64));
+      expect(logs.some((l) => l.includes("0xDeAdBeEf1234"))).toBe(true);
+      expect(logs.some((l) => l.includes("sepoliafaucet.com"))).toBe(true);
+      expect(logs.some((l) => l.includes("alchemy.com/faucets/ethereum-sepolia"))).toBe(
+        true,
+      );
+    });
+
+    it("spins a spinner while deriving the address", async () => {
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      await runFaucet("0x" + "a".repeat(64), "EVM");
+      expect(mockSpinner.start).toHaveBeenCalled();
+    });
+
+    it("shows a failure message when the private key is invalid", async () => {
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      await runFaucet("INVALID_EVM_KEY", "EVM");
+      expect(mockSpinnerFail).toHaveBeenCalled();
+      const failArg: string = mockSpinnerFail.mock.calls[0][0];
+      expect(failArg).toMatch(/Could not derive wallet address/i);
+    });
+  });
+
+  // ── 3. Solana airdrop success ───────────────────────────────────────────────
+  describe("SOLANA chain — successful airdrop", () => {
+    it("calls requestAirdrop and confirmTransaction then shows the balance", async () => {
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      await runFaucet("ValidBase58Key", "SOLANA");
+
+      expect(mockRequestAirdrop).toHaveBeenCalledTimes(1);
+      expect(mockConfirmTransaction).toHaveBeenCalledTimes(1);
+      expect(mockSpinnerSucceed).toHaveBeenCalledWith(expect.stringContaining("Airdrop confirmed"));
+      // Balance: 2 SOL shown
+      expect(logs.some((l) => l.includes("2.000000"))).toBe(true);
+    });
+
+    it("passes the airdrop signature to confirmTransaction", async () => {
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      await runFaucet("ValidBase58Key", "SOLANA");
+
+      const confirmArg = mockConfirmTransaction.mock.calls[0][0];
+      expect(confirmArg).toMatchObject({ signature: "airdrop-sig-abc123" });
+    });
+
+    it("includes the explorer link in the output", async () => {
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      await runFaucet("ValidBase58Key", "SOLANA");
+
+      expect(
+        logs.some(
+          (l) =>
+            l.includes("explorer.solana.com/tx/airdrop-sig-abc123") &&
+            l.includes("cluster=devnet"),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  // ── 4. Solana rate-limit failure ────────────────────────────────────────────
+  describe("SOLANA chain — rate-limited airdrop", () => {
+    const rateLimitMessages = [
+      "HTTP 429: Too Many Requests",
+      "airdrop limit exceeded",
+      "rate limit reached",
+      "request limit hit",
+    ];
+
+    for (const msg of rateLimitMessages) {
+      it(`detects rate-limit from message: "${msg}"`, async () => {
+        mockRequestAirdrop.mockRejectedValue(new Error(msg));
+
+        const logs: string[] = [];
+        vi.spyOn(console, "log").mockImplementation((...args) =>
+          void logs.push(args.join(" ")),
+        );
+
+        await runFaucet("ValidBase58Key", "SOLANA");
+
+        expect(mockSpinnerFail).toHaveBeenCalledWith(
+          expect.stringContaining("Airdrop rate-limited"),
+        );
+        expect(
+          logs.some((l) => l.includes("faucet.solana.com")),
+        ).toBe(true);
+        expect(
+          logs.some((l) => l.includes("60 seconds")),
+        ).toBe(true);
+      });
+    }
+
+    it("shows a generic RPC error message for non-rate-limit failures", async () => {
+      mockRequestAirdrop.mockRejectedValue(new Error("connection refused"));
+
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      await runFaucet("ValidBase58Key", "SOLANA");
+
+      expect(mockSpinnerFail).toHaveBeenCalledWith(
+        expect.stringContaining("Airdrop failed"),
+      );
+      expect(logs.some((l) => l.includes("connection refused"))).toBe(true);
+      // Should NOT show the rate-limit-specific "60 seconds" hint
+      expect(logs.some((l) => l.includes("60 seconds"))).toBe(false);
+    });
+  });
+});
