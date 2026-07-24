@@ -117,9 +117,33 @@ export async function runLogin(apiUrl: string): Promise<void> {
       return;
     }
 
+    spinner.text = c.muted("Checking for existing CLI keys…");
+
+    // ── Step 2: Revoke any existing active CLI keys ──────────────────────────
+    const listRes = await fetch(`${apiUrl}/api/api-keys`, {
+      headers: { Cookie: cookieHeader },
+    });
+
+    if (listRes.ok) {
+      const existing = (await listRes.json()) as Array<{
+        id: number;
+        label: string;
+        revokedAt: string | null;
+      }>;
+      const activeCliKeys = existing.filter(
+        k => k.label === "CLI" && !k.revokedAt,
+      );
+      for (const key of activeCliKeys) {
+        await fetch(`${apiUrl}/api/api-keys/${key.id}`, {
+          method: "DELETE",
+          headers: { Cookie: cookieHeader },
+        });
+      }
+    }
+
     spinner.text = c.muted("Creating CLI API key…");
 
-    // ── Step 2: Create a named API key via the session ──────────────────────
+    // ── Step 3: Create a named API key via the session ──────────────────────
     const keyRes = await fetch(`${apiUrl}/api/api-keys`, {
       method: "POST",
       headers: {
