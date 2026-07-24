@@ -1,5 +1,5 @@
 kind = "web"
-previewPath = "/aura-forge-landing/"
+previewPath = "/"
 title = "AURA Forge — Landing Page"
 version = "1.0.0"
 id = "artifacts/aura-forge-landing"
@@ -7,7 +7,7 @@ router = "path"
 
 [[services]]
 name = "web"
-paths = [ "/aura-forge-landing/" ]
+paths = [ "/" ]
 localPort = 21186
 
 [services.development]
@@ -24,4 +24,4 @@ to = "/index.html"
 
 [services.env]
 PORT = "21186"
-BASE_PATH = "/aura-forge-landing/"
+BASE_PATH = "/"
