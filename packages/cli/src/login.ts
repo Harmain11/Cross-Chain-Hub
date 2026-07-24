@@ -84,6 +84,12 @@ export async function runLogin(apiUrl: string): Promise<void> {
     return;
   }
 
+  const atIdx = email.indexOf("@");
+  if (atIdx < 1 || atIdx === email.length - 1 || email.indexOf(".", atIdx) === -1) {
+    console.log(`  ${c.red(icon.cross)} Invalid email address — please check the format and try again.\n`);
+    return;
+  }
+
   const password = await readPassword(`  ${c.muted("Password")} ${c.dim("›")} `);
 
   if (!password) {
@@ -211,6 +217,12 @@ export async function runSignup(apiUrl: string): Promise<void> {
 
   if (!email) {
     console.log(`  ${c.red(icon.cross)} Email is required.\n`);
+    return;
+  }
+
+  const atIdx = email.indexOf("@");
+  if (atIdx < 1 || atIdx === email.length - 1 || email.indexOf(".", atIdx) === -1) {
+    console.log(`  ${c.red(icon.cross)} Invalid email address — please check the format and try again.\n`);
     return;
   }
 
