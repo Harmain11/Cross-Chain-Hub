@@ -12,6 +12,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -69,6 +70,25 @@ for (const { name, version, path } of current) {
     process.exit(1);
   }
 }
+
+// Verify both packages build cleanly before touching any package.json
+console.log("\nVerifying builds before bumping versions…");
+const BUILD_FILTERS = ["@aura-forge/cli", "@aura-forge/mcp"];
+for (const filter of BUILD_FILTERS) {
+  console.log(`  Building ${filter}…`);
+  try {
+    execSync(`pnpm --filter ${filter} run build`, {
+      stdio: "inherit",
+      cwd: __dirname,
+    });
+  } catch {
+    console.error(
+      `\nError: build failed for ${filter}. Version bump aborted — no files were changed.\n`
+    );
+    process.exit(1);
+  }
+}
+console.log("  ✓ Both packages built successfully.\n");
 
 // Apply the version bump
 for (const { path } of current) {
