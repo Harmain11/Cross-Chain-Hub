@@ -50,7 +50,11 @@ if (subcommand === "login") {
 }
 
 if (subcommand === "logout") {
-  runLogout();
+  const apiUrl =
+    flagVal("--api-url") ??
+    process.env.AURA_FORGE_API_URL ??
+    loadConfig().apiUrl;
+  await runLogout(apiUrl);
   process.exit(0);
 }
 

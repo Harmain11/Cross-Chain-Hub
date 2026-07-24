@@ -275,7 +275,7 @@ export async function runSignup(apiUrl: string): Promise<void> {
 
 // ─── Logout ───────────────────────────────────────────────────────────────────
 
-export function runLogout(): void {
+export async function runLogout(apiUrl: string): Promise<void> {
   const cfg = loadConfig();
   if (!cfg.apiKey) {
     console.log();
@@ -283,10 +283,67 @@ export function runLogout(): void {
     console.log();
     return;
   }
+
+  const spinner = ora({ text: c.muted("Revoking API key on server…"), indent: 2 }).start();
+
+  let serverRevoked = false;
+  try {
+    // ── Step 1: List keys (authenticated with the stored API key) ────────────
+    const listRes = await fetch(`${apiUrl}/api/api-keys`, {
+      headers: { Authorization: `Bearer ${cfg.apiKey}` },
+    });
+
+    if (listRes.ok) {
+      const keys = (await listRes.json()) as Array<{
+        id: number;
+        label: string;
+        keyPrefix: string;
+        revokedAt: string | null;
+      }>;
+
+      // The full key starts with the keyPrefix stored on the server
+      const localPrefix = cfg.apiKey.slice(0, 14); // "af_live_" (8) + 6 chars
+      const match = keys.find(k => !k.revokedAt && k.keyPrefix === localPrefix);
+
+      if (match) {
+        // ── Step 2: Revoke the matching key ──────────────────────────────────
+        const delRes = await fetch(`${apiUrl}/api/api-keys/${match.id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${cfg.apiKey}` },
+        });
+        serverRevoked = delRes.ok || delRes.status === 404;
+        if (!serverRevoked) {
+          spinner.warn(
+            c.gold(`Could not revoke key on server (HTTP ${delRes.status}). ` +
+              `Removing locally — the key may still be active.`),
+          );
+        }
+      } else {
+        // Key was already revoked or not found — nothing to do server-side
+        serverRevoked = true;
+      }
+    } else {
+      spinner.warn(
+        c.gold(`Could not reach server to revoke key (HTTP ${listRes.status}). ` +
+          `Removing locally — the key may still be active.`),
+      );
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    spinner.warn(
+      c.gold(`Could not reach server to revoke key (${msg}). ` +
+        `Removing locally — the key may still be active.`),
+    );
+  }
+
+  // ── Step 3: Always clear local config ────────────────────────────────────
   // Remove the apiKey by writing undefined — JSON.stringify drops undefined fields
   saveConfig({ apiKey: undefined });
+
+  if (serverRevoked) {
+    spinner.succeed(c.green("Logged out — API key revoked on server and removed locally."));
+  }
   console.log();
-  console.log(`  ${c.green(icon.check)} Logged out.`);
   console.log(`  ${c.muted("API key removed from")} ${c.dim("~/.aura-forge/config.json")}`);
   console.log();
 }
