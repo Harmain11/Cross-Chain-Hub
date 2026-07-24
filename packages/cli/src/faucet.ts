@@ -121,15 +121,30 @@ export async function runFaucet(
       spinner.text = c.muted("Checking Devnet connectivity…");
       try {
         await connection.getVersion();
-      } catch {
-        spinner.fail(c.red("Cannot reach Devnet RPC"));
-        console.log();
-        console.log(
-          `  ${c.red(icon.cross)} Cannot reach Devnet RPC: ${c.white(rpcUrl)}`,
-        );
-        console.log(
-          `  ${c.muted("Check your internet connection or try a different RPC endpoint.")}`,
-        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const isNetworkError =
+          /ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|Failed to fetch|fetch failed|network error|getaddrinfo/i.test(
+            msg,
+          );
+
+        if (isNetworkError) {
+          spinner.fail(c.red("You appear to be offline"));
+          console.log();
+          console.log(
+            `  ${c.red(icon.cross)} You appear to be offline — check your internet connection.`,
+          );
+        } else {
+          spinner.fail(c.red("Devnet node is unhealthy"));
+          console.log();
+          console.log(
+            `  ${c.red(icon.cross)} Devnet node is unhealthy: ${c.white(rpcUrl)}`,
+          );
+          console.log(
+            `  ${c.muted("Check")} ${c.cyan("https://status.solana.com")} ${c.muted("for current network status.")}`,
+          );
+        }
+
         console.log(`  ${c.muted("You can also request SOL manually at:")}`);
         console.log(`  ${c.dim(icon.dot)} ${c.cyan("https://faucet.solana.com")}`);
         return;

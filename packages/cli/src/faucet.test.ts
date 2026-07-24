@@ -296,8 +296,41 @@ describe("runFaucet()", () => {
 
   // ── 4. Solana pre-flight connectivity check ─────────────────────────────────
   describe("SOLANA chain — Devnet unreachable (pre-flight fails)", () => {
-    it("shows 'Cannot reach Devnet RPC' and the configured URL when getHealth throws", async () => {
-      mockGetVersion.mockRejectedValue(new Error("Failed to fetch"));
+    // ── 4a. Network-level errors → "offline" message ──────────────────────────
+    const networkErrors = [
+      "Failed to fetch",
+      "fetch failed",
+      "ECONNREFUSED",
+      "ENOTFOUND",
+      "ECONNRESET",
+      "ETIMEDOUT",
+      "network error",
+      "getaddrinfo ENOTFOUND api.devnet.solana.com",
+    ];
+
+    for (const msg of networkErrors) {
+      it(`shows "offline" hint for network-level error: "${msg}"`, async () => {
+        mockGetVersion.mockRejectedValue(new Error(msg));
+
+        const logs: string[] = [];
+        vi.spyOn(console, "log").mockImplementation((...args) =>
+          void logs.push(args.join(" ")),
+        );
+
+        await runFaucet("ValidBase58Key", "SOLANA");
+
+        expect(mockSpinnerFail).toHaveBeenCalledWith(
+          expect.stringContaining("offline"),
+        );
+        expect(logs.some((l) => l.includes("check your internet connection"))).toBe(true);
+        // Must NOT show the Solana status page for a local network problem
+        expect(logs.some((l) => l.includes("status.solana.com"))).toBe(false);
+      });
+    }
+
+    // ── 4b. Non-network errors → "unhealthy node" message ────────────────────
+    it("shows 'Devnet node is unhealthy' and status.solana.com for non-network errors", async () => {
+      mockGetVersion.mockRejectedValue(new Error("503 Service Unavailable"));
 
       const logs: string[] = [];
       vi.spyOn(console, "log").mockImplementation((...args) =>
@@ -307,23 +340,15 @@ describe("runFaucet()", () => {
       await runFaucet("ValidBase58Key", "SOLANA");
 
       expect(mockSpinnerFail).toHaveBeenCalledWith(
-        expect.stringContaining("Cannot reach Devnet RPC"),
+        expect.stringContaining("Devnet node is unhealthy"),
       );
-      expect(logs.some((l) => l.includes("https://api.devnet.solana.com"))).toBe(true);
+      expect(logs.some((l) => l.includes("status.solana.com"))).toBe(true);
+      // Must NOT say "check your internet" for a node-side failure
+      expect(logs.some((l) => l.includes("check your internet connection"))).toBe(false);
     });
 
-    it("does not call requestAirdrop when the connectivity check fails", async () => {
-      mockGetVersion.mockRejectedValue(new Error("network error"));
-
-      vi.spyOn(console, "log").mockImplementation(() => {});
-
-      await runFaucet("ValidBase58Key", "SOLANA");
-
-      expect(mockRequestAirdrop).not.toHaveBeenCalled();
-    });
-
-    it("includes a link to faucet.solana.com when unreachable", async () => {
-      mockGetVersion.mockRejectedValue(new Error("ECONNREFUSED"));
+    it("shows the RPC URL in the unhealthy-node message", async () => {
+      mockGetVersion.mockRejectedValue(new Error("500 Internal Server Error"));
 
       const logs: string[] = [];
       vi.spyOn(console, "log").mockImplementation((...args) =>
@@ -332,7 +357,39 @@ describe("runFaucet()", () => {
 
       await runFaucet("ValidBase58Key", "SOLANA");
 
-      expect(logs.some((l) => l.includes("faucet.solana.com"))).toBe(true);
+      expect(logs.some((l) => l.includes("https://api.devnet.solana.com"))).toBe(true);
+    });
+
+    // ── 4c. Shared behaviour for all pre-flight failures ─────────────────────
+    it("does not call requestAirdrop when the connectivity check fails (network)", async () => {
+      mockGetVersion.mockRejectedValue(new Error("ECONNREFUSED"));
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      await runFaucet("ValidBase58Key", "SOLANA");
+      expect(mockRequestAirdrop).not.toHaveBeenCalled();
+    });
+
+    it("does not call requestAirdrop when the connectivity check fails (unhealthy node)", async () => {
+      mockGetVersion.mockRejectedValue(new Error("503 Service Unavailable"));
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      await runFaucet("ValidBase58Key", "SOLANA");
+      expect(mockRequestAirdrop).not.toHaveBeenCalled();
+    });
+
+    it("includes a link to faucet.solana.com for both failure types", async () => {
+      for (const errMsg of ["ECONNREFUSED", "503 Service Unavailable"]) {
+        vi.clearAllMocks();
+        mockSpinner.start.mockReturnThis();
+        mockGetVersion.mockRejectedValue(new Error(errMsg));
+
+        const logs: string[] = [];
+        vi.spyOn(console, "log").mockImplementation((...args) =>
+          void logs.push(args.join(" ")),
+        );
+
+        await runFaucet("ValidBase58Key", "SOLANA");
+
+        expect(logs.some((l) => l.includes("faucet.solana.com"))).toBe(true);
+      }
     });
 
     it("proceeds normally when getVersion succeeds", async () => {
