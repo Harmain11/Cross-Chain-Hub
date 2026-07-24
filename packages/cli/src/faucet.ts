@@ -61,22 +61,38 @@ export async function runFaucet(
         `  ${c.muted("Once funded, run")} ${c.cyan("/deploy <project-id>")} ${c.muted("to deploy your contract.")}`,
       );
 
-      // Also fetch and show current balance if possible
+      // Also fetch and show current balance if possible.
+      // Wrapped with a 5-second timeout so a slow or unresponsive public RPC
+      // cannot block the command after the faucet links are already printed.
       const rpcUrl =
         process.env.AURA_FORGE_EVM_RPC_URL ?? "https://rpc2.sepolia.org";
       const balSpinner = ora({ text: c.muted("Checking current balance…"), indent: 2 }).start();
       try {
-        const provider = new ethers.JsonRpcProvider(rpcUrl);
-        const bal = await provider.getBalance(address);
-        const ethBal = ethers.formatEther(bal);
-        balSpinner.succeed(
-          c.dim(
-            `Current balance: ${c.white(parseFloat(ethBal).toFixed(6))} ETH (Sepolia)`,
-          ),
-        );
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5_000);
+        try {
+          const provider = new ethers.JsonRpcProvider(rpcUrl);
+          const bal = await Promise.race([
+            provider.getBalance(address),
+            new Promise<never>((_, reject) =>
+              controller.signal.addEventListener("abort", () =>
+                reject(new Error("Balance check timed out")),
+              ),
+            ),
+          ]);
+          clearTimeout(timeoutId);
+          const ethBal = ethers.formatEther(bal);
+          balSpinner.succeed(
+            c.dim(
+              `Current balance: ${c.white(parseFloat(ethBal).toFixed(6))} ETH (Sepolia)`,
+            ),
+          );
+        } finally {
+          clearTimeout(timeoutId);
+        }
       } catch {
         balSpinner.stop();
-        // Non-fatal — balance check failed, just skip it
+        // Non-fatal — balance check failed or timed out, just skip it
       }
     } catch (err) {
       spinner.fail(

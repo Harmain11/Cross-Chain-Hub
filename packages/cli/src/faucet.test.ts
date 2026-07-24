@@ -223,6 +223,34 @@ describe("runFaucet()", () => {
     });
   });
 
+  // ── 2b. EVM balance check timeout ──────────────────────────────────────────
+  describe("EVM chain — balance check timeout", () => {
+    it("completes and prints faucet links even when getBalance never resolves", async () => {
+      // getBalance hangs forever — simulated with a promise that never settles
+      mockEthersGetBalance.mockReturnValue(new Promise(() => {}));
+
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      // Advance fake timers past the 5-second timeout so the race resolves
+      vi.useFakeTimers();
+      const faucetPromise = runFaucet("0x" + "a".repeat(64), "EVM");
+      await vi.advanceTimersByTimeAsync(6_000);
+      await faucetPromise;
+      vi.useRealTimers();
+
+      // Faucet links must still appear
+      expect(logs.some((l) => l.includes("sepoliafaucet.com"))).toBe(true);
+      // Balance spinner should have been stopped (not succeeded) due to timeout
+      expect(mockSpinnerSucceed).not.toHaveBeenCalledWith(
+        expect.stringContaining("Current balance"),
+      );
+      expect(mockSpinnerStop).toHaveBeenCalled();
+    });
+  });
+
   // ── 3. Solana airdrop success ───────────────────────────────────────────────
   describe("SOLANA chain — successful airdrop", () => {
     it("calls requestAirdrop and confirmTransaction then shows the balance", async () => {
