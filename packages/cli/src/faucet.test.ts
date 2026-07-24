@@ -80,6 +80,7 @@ const mockRequestAirdrop = vi.fn();
 const mockGetLatestBlockhash = vi.fn();
 const mockConfirmTransaction = vi.fn();
 const mockSolGetBalance = vi.fn();
+const mockGetVersion = vi.fn();
 
 vi.mock("@solana/web3.js", () => ({
   Connection: class {
@@ -88,6 +89,7 @@ vi.mock("@solana/web3.js", () => ({
     getLatestBlockhash = mockGetLatestBlockhash;
     confirmTransaction = mockConfirmTransaction;
     getBalance = mockSolGetBalance;
+    getVersion = mockGetVersion;
   },
   LAMPORTS_PER_SOL: 1_000_000_000,
   Keypair: {
@@ -147,6 +149,7 @@ describe("runFaucet()", () => {
     mockSpinner.start.mockReturnThis();
 
     // Default successful airdrop mocks
+    mockGetVersion.mockResolvedValue({ "solana-core": "1.18.0", "feature-set": 1 });
     mockRequestAirdrop.mockResolvedValue("airdrop-sig-abc123");
     mockGetLatestBlockhash.mockResolvedValue({
       blockhash: "blockhash123",
@@ -263,7 +266,62 @@ describe("runFaucet()", () => {
     });
   });
 
-  // ── 4. Solana rate-limit failure ────────────────────────────────────────────
+  // ── 4. Solana pre-flight connectivity check ─────────────────────────────────
+  describe("SOLANA chain — Devnet unreachable (pre-flight fails)", () => {
+    it("shows 'Cannot reach Devnet RPC' and the configured URL when getHealth throws", async () => {
+      mockGetVersion.mockRejectedValue(new Error("Failed to fetch"));
+
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      await runFaucet("ValidBase58Key", "SOLANA");
+
+      expect(mockSpinnerFail).toHaveBeenCalledWith(
+        expect.stringContaining("Cannot reach Devnet RPC"),
+      );
+      expect(logs.some((l) => l.includes("https://api.devnet.solana.com"))).toBe(true);
+    });
+
+    it("does not call requestAirdrop when the connectivity check fails", async () => {
+      mockGetVersion.mockRejectedValue(new Error("network error"));
+
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await runFaucet("ValidBase58Key", "SOLANA");
+
+      expect(mockRequestAirdrop).not.toHaveBeenCalled();
+    });
+
+    it("includes a link to faucet.solana.com when unreachable", async () => {
+      mockGetVersion.mockRejectedValue(new Error("ECONNREFUSED"));
+
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      await runFaucet("ValidBase58Key", "SOLANA");
+
+      expect(logs.some((l) => l.includes("faucet.solana.com"))).toBe(true);
+    });
+
+    it("proceeds normally when getVersion succeeds", async () => {
+      mockGetVersion.mockResolvedValue({ "solana-core": "1.18.0", "feature-set": 1 });
+
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await runFaucet("ValidBase58Key", "SOLANA");
+
+      expect(mockRequestAirdrop).toHaveBeenCalledTimes(1);
+      expect(mockSpinnerSucceed).toHaveBeenCalledWith(
+        expect.stringContaining("Airdrop confirmed"),
+      );
+    });
+  });
+
+  // ── 5. Solana rate-limit failure ────────────────────────────────────────────
   describe("SOLANA chain — rate-limited airdrop", () => {
     const rateLimitMessages = [
       "HTTP 429: Too Many Requests",

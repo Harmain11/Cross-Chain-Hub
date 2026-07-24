@@ -101,6 +101,24 @@ export async function runFaucet(
         process.env.AURA_FORGE_SOL_RPC_URL ?? "https://api.devnet.solana.com";
       const connection = new Connection(rpcUrl, "confirmed");
 
+      // ── Pre-flight connectivity check ────────────────────────────────────
+      spinner.text = c.muted("Checking Devnet connectivity…");
+      try {
+        await connection.getVersion();
+      } catch {
+        spinner.fail(c.red("Cannot reach Devnet RPC"));
+        console.log();
+        console.log(
+          `  ${c.red(icon.cross)} Cannot reach Devnet RPC: ${c.white(rpcUrl)}`,
+        );
+        console.log(
+          `  ${c.muted("Check your internet connection or try a different RPC endpoint.")}`,
+        );
+        console.log(`  ${c.muted("You can also request SOL manually at:")}`);
+        console.log(`  ${c.dim(icon.dot)} ${c.cyan("https://faucet.solana.com")}`);
+        return;
+      }
+
       spinner.text = c.muted(`Airdropping 1 SOL to ${address.slice(0, 8)}…`);
       const sig = await connection.requestAirdrop(keypair.publicKey, LAMPORTS_PER_SOL);
 
