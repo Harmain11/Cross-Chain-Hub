@@ -412,10 +412,28 @@ async function faucetCommand() {
       console.log(`  ${c.muted("Run")} ${c.cyan("/faucet")} ${c.muted("again if you need more SOL (airdrop limit: 2 SOL per request).")}`);
 
     } catch (err) {
-      spinner.fail(c.red(`Airdrop failed: ${err instanceof Error ? err.message : err}`));
-      console.log();
-      console.log(`  ${c.muted("Devnet faucet rate-limits requests. Try again in a minute, or visit:")}`);
-      console.log(`  ${c.dim(icon.dot)} ${c.cyan("https://faucet.solana.com")}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      const isRateLimit =
+        /429|too many requests|rate.?limit|airdrop.?limit|request limit/i.test(msg);
+
+      if (isRateLimit) {
+        spinner.fail(c.gold("Airdrop rate-limited"));
+        console.log();
+        console.log(`  ${c.gold(icon.info)} Devnet limits airdrop requests per address and IP.`);
+        console.log(`  ${c.muted("Wait at least")} ${c.white("60 seconds")} ${c.muted("before trying again, or fund your wallet directly:")}`);
+        console.log();
+        console.log(`  ${c.dim(icon.dot)} ${c.cyan("https://faucet.solana.com")}`);
+        console.log();
+        console.log(`  ${c.muted("Paste your wallet address there to request SOL without CLI rate limits.")}`);
+      } else {
+        spinner.fail(c.red("Airdrop failed"));
+        console.log();
+        console.log(`  ${c.red(icon.cross)} RPC error: ${c.muted(msg)}`);
+        console.log();
+        console.log(`  ${c.muted("Possible causes: RPC node unreachable, network timeout, or invalid keypair.")}`);
+        console.log(`  ${c.muted("You can also request SOL manually at:")}`);
+        console.log(`  ${c.dim(icon.dot)} ${c.cyan("https://faucet.solana.com")}`);
+      }
     }
   }
 }
