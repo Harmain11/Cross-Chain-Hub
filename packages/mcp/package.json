@@ -1,0 +1,26 @@
+{
+  "name": "@aura-forge/mcp",
+  "version": "0.1.0",
+  "description": "AURA Forge MCP Server — smart contract tools for Claude Desktop & Claude Code",
+  "type": "module",
+  "bin": {
+    "aura-forge-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.15.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@aura-forge/cli",
+  "version": "0.1.0",
+  "description": "AURA Forge CLI — AI smart contract factory for your terminal",
+  "type": "module",
+  "bin": {
+    "aura-forge": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "ora": "^8.1.1",
+    "commander": "^12.1.0",
+    "glob": "^11.0.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

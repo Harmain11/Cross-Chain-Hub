@@ -2,6 +2,7 @@ packages:
   - artifacts/*
   - lib/*
   - lib/integrations/*
+  - packages/*
   - scripts
 
 autoInstallPeers: false
