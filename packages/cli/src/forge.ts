@@ -105,22 +105,6 @@ export async function getProject(cfg: AuraConfig, id: number): Promise<ForgeProj
   return (await res.json()) as ForgeProject;
 }
 
-/** Login with email+password, returns session cookie. */
-export async function login(cfg: AuraConfig, email: string, password: string): Promise<string> {
-  const res = await fetch(`${cfg.apiUrl}/api/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-    credentials: "include",
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Login failed ${res.status}: ${body}`);
-  }
-  const cookie = res.headers.get("set-cookie") ?? "";
-  return cookie;
-}
-
 /** Derive a clean contract name from a natural-language prompt. */
 export function deriveContractName(prompt: string): string {
   // Extract noun phrase from common patterns

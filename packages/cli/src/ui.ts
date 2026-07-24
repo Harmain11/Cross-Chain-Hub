@@ -81,11 +81,22 @@ export function printHelp(): void {
     ["/list",               "List all contracts found in the current workspace"],
     ["/chain [evm|solana]", "Switch default chain (current session)"],
     ["/save <path>",        "Set output directory for generated contracts"],
-    ["/key <api-key>",      "Set your AURA Forge API key (saved to ~/.aura-forge/config.json)"],
+    ["/key <api-key>",      "Paste an API key directly (or run aura-forge login instead)"],
     ["/help",               "Show this help"],
     ["/exit",               "Quit"],
   ];
   for (const [cmd, desc] of cmds) {
+    console.log(`  ${c.cyan(cmd.padEnd(28))} ${c.muted(desc)}`);
+  }
+  console.log();
+  console.log(`  ${c.bold(c.white("Auth"))}`);
+  console.log();
+  const authCmds: [string, string][] = [
+    ["aura-forge login",    "Sign in with email + password (run outside the REPL)"],
+    ["aura-forge logout",   "Remove saved credentials"],
+    ["aura-forge whoami",   "Show current login status"],
+  ];
+  for (const [cmd, desc] of authCmds) {
     console.log(`  ${c.cyan(cmd.padEnd(28))} ${c.muted(desc)}`);
   }
   console.log();

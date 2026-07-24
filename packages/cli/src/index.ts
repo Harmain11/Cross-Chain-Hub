@@ -16,6 +16,7 @@ import {
   type Chain,
   type ForgeEvent,
 } from "./forge.js";
+import { runLogin, runLogout } from "./login.js";
 
 // ─── CLI flags ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -23,9 +24,43 @@ const flagVal = (flag: string) => {
   const i = args.indexOf(flag);
   return i !== -1 ? args[i + 1] : undefined;
 };
+
+// ─── Top-level subcommands (run and exit) ──────────────────────────────────────
+const subcommand = args[0];
+
+if (subcommand === "login") {
+  const apiUrl =
+    flagVal("--api-url") ??
+    process.env.AURA_FORGE_API_URL ??
+    loadConfig().apiUrl;
+  await runLogin(apiUrl);
+  process.exit(0);
+}
+
+if (subcommand === "logout") {
+  runLogout();
+  process.exit(0);
+}
+
+if (subcommand === "whoami") {
+  const cfg = loadConfig();
+  if (cfg.apiKey) {
+    const prefix = cfg.apiKey.slice(0, 8);
+    console.log(`\n  ${c.green(icon.check)} Logged in  ${c.dim("·")}  key ${c.muted(prefix + "…")}\n`);
+  } else {
+    console.log(`\n  ${c.gold(icon.info)} Not logged in. Run ${c.cyan("aura-forge login")}\n`);
+  }
+  process.exit(0);
+}
+
 if (args.includes("--help") || args.includes("-h")) {
   console.log(`
-  ${c.bold(c.white("aura-forge"))} [options]
+  ${c.bold(c.white("aura-forge"))} [command] [options]
+
+  ${c.muted("Commands:")}
+    login              Sign in with email + password (saves API key automatically)
+    logout             Remove saved credentials
+    whoami             Show whether you are currently logged in
 
   ${c.muted("Options:")}
     --api-url <url>    API server URL  (env: AURA_FORGE_API_URL)
@@ -66,8 +101,8 @@ function prompt() {
 async function forge(userPrompt: string, extraContext?: string) {
   if (!cfg.apiKey) {
     console.log();
-    console.log(`  ${c.red(icon.cross)} No API key set. Run ${c.cyan("/key <your-api-key>")} first.`);
-    console.log(`  ${c.muted("Get your key at")} ${c.cyan("https://aura-forge.replit.app/settings/api-keys")}`);
+    console.log(`  ${c.red(icon.cross)} Not logged in. Run ${c.cyan("aura-forge login")} to sign in.`);
+    console.log(`  ${c.muted("Or paste a key with")} ${c.cyan("/key <your-api-key>")}`);
     return;
   }
 
@@ -227,12 +262,18 @@ async function main() {
     console.log(`  ${c.muted("  No contracts found yet — describe one to forge your first.")}`);
   }
 
-  // Auth status
+  // Auth status — auto-login if no key is configured
   if (!cfg.apiKey) {
     console.log();
-    console.log(`  ${c.gold(icon.info)} No API key set.`);
-    console.log(`  ${c.muted("Run")} ${c.cyan("/key <your-api-key>")} ${c.muted("or set")} ${c.cyan("AURA_FORGE_API_KEY")} ${c.muted("to get started.")}`);
-    console.log(`  ${c.muted("Generate a key at")} ${c.cyan("https://aura-forge.replit.app/settings/api-keys")}`);
+    console.log(`  ${c.gold(icon.info)} No API key found.`);
+    console.log(`  ${c.muted("Starting login flow…  (Ctrl-C to skip)")} `);
+    await runLogin(cfg.apiUrl);
+    // Reload so the rest of the REPL picks up the newly saved key
+    const fresh = resolveConfig({ apiUrl: flagVal("--api-url"), apiKey: flagVal("--api-key") });
+    (cfg as any).apiKey = fresh.apiKey;
+    if (!cfg.apiKey) {
+      console.log(`  ${c.muted("Tip: run")} ${c.cyan("aura-forge login")} ${c.muted("any time to sign in, or")} ${c.cyan("/key <key>")} ${c.muted("to paste a key.")}`);
+    }
   }
 
   console.log();
