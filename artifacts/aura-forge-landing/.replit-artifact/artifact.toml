@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/aura-forge-landing/"
+title = "AURA Forge — Landing Page"
+version = "1.0.0"
+id = "artifacts/aura-forge-landing"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/aura-forge-landing/" ]
+localPort = 21186
+
+[services.development]
+run = "pnpm --filter @workspace/aura-forge-landing run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/aura-forge-landing", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/aura-forge-landing/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21186"
+BASE_PATH = "/aura-forge-landing/"
