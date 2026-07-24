@@ -1,13 +1,19 @@
 /**
- * Integration test: logging in twice must leave exactly one active CLI key.
+ * Integration tests: duplicate CLI key prevention for login and signup.
  *
- * This mirrors the three-step sequence the CLI performs in login.ts:
+ * Login test mirrors the three-step sequence the CLI performs in login.ts:
  *   1. POST /api/auth/login  → obtain session cookie
  *   2. GET  /api/api-keys    → find & DELETE any active "CLI" keys
  *   3. POST /api/api-keys    → create one fresh "CLI" key
  *
- * After running that sequence twice we assert only a single active
- * (non-revoked) key labelled "CLI" remains for the test user.
+ * Signup test mirrors the four-step sequence the CLI performs in login.ts
+ * (runSignup):
+ *   1. POST /api/auth/signup → obtain session cookie (first run only)
+ *   2. GET  /api/api-keys    → find & DELETE any active "CLI" keys
+ *   3. POST /api/api-keys    → create one fresh "CLI" key
+ *
+ * Both sequences are run twice to assert only a single active (non-revoked)
+ * key labelled "CLI" remains for the test user.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -20,6 +26,7 @@ import app from "../app.js";
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
 const TEST_EMAIL = `test-double-login-${Date.now()}@example.com`;
+const SIGNUP_TEST_EMAIL = `test-double-signup-${Date.now()}@example.com`;
 const TEST_PASSWORD = "TestPass123!";
 
 async function createTestUser() {
@@ -159,6 +166,143 @@ describe("CLI login flow — duplicate key prevention", () => {
       .where(
         and(
           eq(apiKeysTable.userId, userId),
+          eq(apiKeysTable.id, otherKeyId),
+        ),
+      );
+
+    expect(allKeys).toHaveLength(1);
+    expect(allKeys[0]!.revokedAt).toBeNull();
+  });
+});
+
+// ─── Helpers for signup flow ──────────────────────────────────────────────────
+
+/**
+ * Perform one full "CLI signup" key-creation sequence via HTTP for an already-
+ * authenticated session.  This mirrors what runSignup does after account
+ * creation:
+ *   1. GET  /api/api-keys    → find & DELETE any active "CLI" keys
+ *   2. POST /api/api-keys    → create one fresh "CLI" key
+ *
+ * The caller is responsible for establishing the session on the agent before
+ * invoking this (e.g. via POST /api/auth/login or POST /api/auth/signup).
+ */
+async function performSignupCliKeyCreation(
+  agent: ReturnType<typeof request.agent>,
+): Promise<void> {
+  // Step 1 – revoke any existing active CLI keys (matches runSignup behaviour)
+  const listRes = await agent.get("/api/api-keys");
+  expect(listRes.status).toBe(200);
+
+  const existing: ApiKeyRow[] = listRes.body;
+  const activeCliKeys = existing.filter(
+    (k) => k.label === "CLI" && !k.revokedAt,
+  );
+  for (const key of activeCliKeys) {
+    const delRes = await agent.delete(`/api/api-keys/${key.id}`);
+    expect(delRes.status).toBe(204);
+  }
+
+  // Step 2 – create a fresh CLI key
+  const createRes = await agent
+    .post("/api/api-keys")
+    .send({ label: "CLI" });
+  expect(createRes.status).toBe(201);
+}
+
+// ─── Signup flow tests ────────────────────────────────────────────────────────
+
+describe("CLI signup flow — duplicate key prevention", () => {
+  let signupUserId: number;
+
+  beforeAll(async () => {
+    // Pre-create the user so we can log in without hitting the signup endpoint
+    // (which can only be called once per email). This lets us simulate the
+    // scenario where the session is reused and the key-creation step is retried.
+    const passwordHash = await bcrypt.hash(TEST_PASSWORD, 1);
+    const [user] = await db
+      .insert(usersTable)
+      .values({ email: SIGNUP_TEST_EMAIL, passwordHash })
+      .returning();
+    signupUserId = user!.id;
+  });
+
+  afterAll(async () => {
+    await db.delete(apiKeysTable).where(eq(apiKeysTable.userId, signupUserId));
+    await db.delete(usersTable).where(eq(usersTable.id, signupUserId));
+  });
+
+  it(
+    "leaves exactly one active CLI key when the key-creation step is retried on the same session",
+    async () => {
+      const agent = request.agent(app);
+
+      // Establish a session (mirrors what POST /api/auth/signup would do)
+      const loginRes = await agent
+        .post("/api/auth/login")
+        .send({ email: SIGNUP_TEST_EMAIL, password: TEST_PASSWORD });
+      expect(loginRes.status).toBe(200);
+
+      // First key-creation attempt (e.g. normal signup completing successfully)
+      await performSignupCliKeyCreation(agent);
+
+      // Second key-creation attempt on the same session (e.g. CLI retry after
+      // a transient network error on the first attempt).
+      // With the revoke-then-create fix this must leave only one active key.
+      await performSignupCliKeyCreation(agent);
+
+      // Assert via the DB directly
+      const allKeys = await db
+        .select()
+        .from(apiKeysTable)
+        .where(eq(apiKeysTable.userId, signupUserId));
+
+      const activeCliKeys = allKeys.filter(
+        (k) => k.label === "CLI" && k.revokedAt === null,
+      );
+
+      expect(
+        activeCliKeys,
+        "Expected exactly one active CLI key after two key-creation attempts",
+      ).toHaveLength(1);
+
+      // The first key must have been revoked by the second attempt
+      const revokedCliKeys = allKeys.filter(
+        (k) => k.label === "CLI" && k.revokedAt !== null,
+      );
+      expect(
+        revokedCliKeys,
+        "Expected the first CLI key to be revoked by the retry",
+      ).toHaveLength(1);
+    },
+  );
+
+  it("does not revoke non-CLI keys during signup key creation", async () => {
+    const agent = request.agent(app);
+
+    // Establish a session
+    const loginRes = await agent
+      .post("/api/auth/login")
+      .send({ email: SIGNUP_TEST_EMAIL, password: TEST_PASSWORD });
+    expect(loginRes.status).toBe(200);
+
+    // Create a non-CLI key that should survive
+    const otherKeyRes = await agent
+      .post("/api/api-keys")
+      .send({ label: "Production" });
+    expect(otherKeyRes.status).toBe(201);
+    const otherKeyId: number = otherKeyRes.body.id;
+
+    // Perform the signup key-creation sequence
+    await performSignupCliKeyCreation(agent);
+
+    // The "Production" key must still be active
+    const allKeys = await db
+      .select()
+      .from(apiKeysTable)
+      .where(
+        and(
+          eq(apiKeysTable.userId, signupUserId),
           eq(apiKeysTable.id, otherKeyId),
         ),
       );

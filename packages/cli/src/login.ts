@@ -269,9 +269,37 @@ export async function runSignup(apiUrl: string): Promise<void> {
       return;
     }
 
+    spinner.text = c.muted("Checking for existing CLI keys…");
+
+    // ── Step 2: Revoke any existing active CLI keys ──────────────────────────
+    // Handles retries: if the account was just created but the key-creation
+    // step was interrupted, re-running signup would have 409'd above. However,
+    // if the session is somehow reused (e.g. a CLI retry that bypassed the
+    // signup step), we must not silently accumulate duplicate keys.
+    const listRes = await fetch(`${apiUrl}/api/api-keys`, {
+      headers: { Cookie: cookieHeader },
+    });
+
+    if (listRes.ok) {
+      const existing = (await listRes.json()) as Array<{
+        id: number;
+        label: string;
+        revokedAt: string | null;
+      }>;
+      const activeCliKeys = existing.filter(
+        k => k.label === "CLI" && !k.revokedAt,
+      );
+      for (const key of activeCliKeys) {
+        await fetch(`${apiUrl}/api/api-keys/${key.id}`, {
+          method: "DELETE",
+          headers: { Cookie: cookieHeader },
+        });
+      }
+    }
+
     spinner.text = c.muted("Creating CLI API key…");
 
-    // ── Step 2: Create a named API key via the session ──────────────────────
+    // ── Step 3: Create a named API key via the session ──────────────────────
     const keyRes = await fetch(`${apiUrl}/api/api-keys`, {
       method: "POST",
       headers: {
@@ -289,7 +317,7 @@ export async function runSignup(apiUrl: string): Promise<void> {
 
     const keyData = (await keyRes.json()) as { id: number; fullKey: string };
 
-    // ── Step 3: Persist ─────────────────────────────────────────────────────
+    // ── Step 4: Persist ─────────────────────────────────────────────────────
     saveConfig({ apiKey: keyData.fullKey, apiKeyId: keyData.id });
 
     spinner.succeed(c.green("Account created"));
