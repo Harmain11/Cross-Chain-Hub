@@ -113,11 +113,19 @@ export async function runFaucet(
         "confirmed",
       );
 
-      // Fetch resulting balance
-      const lamports = await connection.getBalance(keypair.publicKey);
-      const sol = lamports / LAMPORTS_PER_SOL;
-
       spinner.succeed(c.green("Airdrop confirmed"));
+
+      // Fetch and display the resulting balance as a separate, explicit step
+      const balSpinner = ora({ text: c.muted("Fetching updated balance…"), indent: 2 }).start();
+      let sol: number;
+      try {
+        const lamports = await connection.getBalance(keypair.publicKey);
+        sol = lamports / LAMPORTS_PER_SOL;
+        balSpinner.succeed(c.dim(`New balance: ${c.white(sol.toFixed(6) + " SOL")} (Devnet)`));
+      } catch {
+        balSpinner.warn(c.gold("Could not fetch updated balance — funds may still have arrived."));
+        sol = 0;
+      }
 
       console.log();
       console.log(
@@ -132,7 +140,7 @@ export async function runFaucet(
       );
       console.log();
       console.log(
-        `  ${c.muted("Run")} ${c.cyan("/faucet")} ${c.muted("again if you need more SOL (airdrop limit: 2 SOL per request).")}`,
+        `  ${c.muted("Run")} ${c.cyan("/balance")} ${c.muted("any time to check your balance, or")} ${c.cyan("/faucet")} ${c.muted("for more SOL.")}`,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

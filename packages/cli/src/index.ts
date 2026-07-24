@@ -377,6 +377,53 @@ async function deployCommand(arg: string) {
   }
 }
 
+// ─── /balance command ──────────────────────────────────────────────────────────
+async function balanceCommand() {
+  const walletKey = resolveWalletKey(cfg.walletPrivateKey);
+  if (!walletKey) {
+    console.log();
+    console.log(`  ${c.red(icon.cross)} No wallet key configured.`);
+    console.log(`  ${c.muted("Set one with")} ${c.cyan("/wallet <key>")} ${c.muted("then run")} ${c.cyan("/balance")} ${c.muted("again.")}`);
+    return;
+  }
+
+  console.log();
+  const spinner = ora({ text: c.muted("Fetching wallet balance…"), indent: 2 }).start();
+  try {
+    if (chain === "EVM") {
+      const bal = await getEvmBalance(walletKey);
+      if (bal) {
+        const ethStr = bal.balanceEth.toFixed(6);
+        const LOW_ETH = 0.01;
+        if (bal.balanceEth < LOW_ETH) {
+          spinner.warn(c.gold(`Wallet balance: ${c.white(ethStr + " ETH")} (Sepolia)  ${c.dim("—")}  low funds`));
+          console.log(`  ${c.gold(icon.info)} Balance is below ${LOW_ETH} ETH. Run ${c.cyan("/faucet")} to top up.`);
+        } else {
+          spinner.succeed(c.dim(`Wallet balance: ${c.white(ethStr + " ETH")} (Sepolia)`));
+        }
+      } else {
+        spinner.fail(c.red("Could not fetch wallet balance."));
+      }
+    } else {
+      const bal = await getSolanaBalance(walletKey);
+      if (bal) {
+        const solStr = bal.balanceSol.toFixed(6);
+        const LOW_SOL = 0.1;
+        if (bal.balanceSol < LOW_SOL) {
+          spinner.warn(c.gold(`Wallet balance: ${c.white(solStr + " SOL")} (Devnet)  ${c.dim("—")}  low funds`));
+          console.log(`  ${c.gold(icon.info)} Balance is below ${LOW_SOL} SOL. Run ${c.cyan("/faucet")} to top up.`);
+        } else {
+          spinner.succeed(c.dim(`Wallet balance: ${c.white(solStr + " SOL")} (Devnet)`));
+        }
+      } else {
+        spinner.fail(c.red("Could not fetch wallet balance."));
+      }
+    }
+  } catch (err) {
+    spinner.fail(c.red(`Balance check failed: ${err instanceof Error ? err.message : String(err)}`));
+  }
+}
+
 // ─── /faucet command ───────────────────────────────────────────────────────────
 async function faucetCommand() {
   const walletKey = resolveWalletKey(cfg.walletPrivateKey);
@@ -506,6 +553,12 @@ async function main() {
       (cfg as any).walletPrivateKey = key;
       console.log(`  ${c.green(icon.check)} Wallet key saved to ${c.muted("~/.aura-forge/config.json")}`);
       console.log(`  ${c.gold(icon.info)} Keep this file private — it contains your wallet key.`);
+      prompt();
+      return;
+    }
+
+    if (line === "/balance") {
+      await balanceCommand();
       prompt();
       return;
     }
