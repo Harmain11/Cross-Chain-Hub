@@ -424,8 +424,8 @@ describe("runFaucet()", () => {
 
       vi.useFakeTimers();
       const faucetPromise = runFaucet("ValidBase58Key", "SOLANA");
-      // Advance past the 8-second pre-flight timeout
-      await vi.advanceTimersByTimeAsync(9_000);
+      // Advance past the 5-second pre-flight timeout
+      await vi.advanceTimersByTimeAsync(6_000);
       await faucetPromise;
       vi.useRealTimers();
 

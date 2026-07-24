@@ -118,10 +118,10 @@ export async function runFaucet(
       const connection = new Connection(rpcUrl, "confirmed");
 
       // ── Pre-flight connectivity check ────────────────────────────────────
-      // Wrapped with an 8-second timeout so a slow or unresponsive Devnet RPC
+      // Wrapped with a 5-second timeout so a slow or unresponsive Devnet RPC
       // (e.g. a TCP timeout rather than an immediate ECONNREFUSED) cannot stall
       // the command for the OS-level socket timeout (often 30–120 s).
-      const PREFLIGHT_TIMEOUT_MS = 8_000;
+      const PREFLIGHT_TIMEOUT_MS = 5_000;
       const PREFLIGHT_TIMEOUT_SENTINEL = "__PREFLIGHT_TIMEOUT__";
       spinner.text = c.muted("Checking Devnet connectivity…");
       try {
