@@ -11,6 +11,65 @@
 
 import type { FullForgeProject } from "./forge.js";
 
+// ─── Retry helper ─────────────────────────────────────────────────────────────
+
+/** Returns true when the error looks like an HTTP 429 / rate-limit response. */
+function isRateLimitError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes("429") || /too many requests/i.test(msg) || /rate.?limit/i.test(msg);
+}
+
+/**
+ * Returns true for errors that should never trigger a retry because they
+ * indicate a definitive misconfiguration or on-chain rejection, not a
+ * transient RPC hiccup (e.g. bad private key, insufficient funds, invalid
+ * API key).
+ */
+function isFatalError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    /insufficient.?funds/i.test(msg) ||
+    /invalid.?(private.?key|secret.?key|wallet.?key|key)/i.test(msg) ||
+    /bad.?key/i.test(msg) ||
+    /\bunauthorized\b/i.test(msg) ||
+    /invalid.?api.?key/i.test(msg)
+  );
+}
+
+/**
+ * Attempt `fn` up to `maxAttempts` times, retrying only when the error looks
+ * like a transient rate-limit (429 / Too Many Requests).  Fatal errors (bad
+ * key, insufficient funds, …) propagate immediately without retrying.
+ *
+ * Default back-off schedule: 500 ms → 1 000 ms (exponential ×2, 3 attempts).
+ */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  {
+    maxAttempts = 3,
+    baseDelayMs = 500,
+  }: { maxAttempts?: number; baseDelayMs?: number } = {},
+): Promise<T> {
+  let attempt = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      attempt++;
+      // Fatal errors or non-rate-limit errors: propagate immediately.
+      if (isFatalError(err) || !isRateLimitError(err) || attempt >= maxAttempts) {
+        throw err;
+      }
+      const delay = baseDelayMs * Math.pow(2, attempt - 1);
+      console.error(
+        `  Rate-limited — retrying in ${delay} ms (attempt ${attempt}/${maxAttempts})…`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 export type DeployResult = {
   txHash: string;
   contractAddress: string;
@@ -48,6 +107,9 @@ export async function deployEvm(
   // Dynamic import keeps ethers out of the module graph until needed.
   const { ethers } = await import("ethers");
 
+  // Capture bytecode as a local so the closure sees a narrowed string type.
+  const bytecode = project.compiledBytecode;
+
   let abi: unknown[] = [];
   if (project.abiOrIdl) {
     try {
@@ -57,34 +119,13 @@ export async function deployEvm(
     }
   }
 
-  // If the caller or env var provides a specific URL, use it directly.
-  if (rpcUrl ?? DEFAULT_EVM_RPC) {
-    const url = (rpcUrl ?? DEFAULT_EVM_RPC)!;
-    const provider = new ethers.JsonRpcProvider(url);
-    const wallet = new ethers.Wallet(privateKey, provider);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const factory = new ethers.ContractFactory(abi as any, project.compiledBytecode, wallet);
-    const contract = await factory.deploy();
-    const receipt = await contract.deploymentTransaction()!.wait(1);
-    const contractAddress = await contract.getAddress();
-    const txHash = receipt?.hash ?? contract.deploymentTransaction()!.hash;
-    return {
-      txHash,
-      contractAddress,
-      networkLabel: "sepolia",
-      explorerUrl: `https://sepolia.etherscan.io/address/${contractAddress}`,
-    };
-  }
-
-  // Try each public fallback in order.
-  const errors: string[] = [];
-  for (const url of EVM_RPC_FALLBACKS) {
-    try {
-      console.error(`  Trying Sepolia RPC: ${url}`);
+  /** Deploy against a single Sepolia RPC URL, with rate-limit retries. */
+  const tryEvmUrl = (url: string) =>
+    withRetry(async () => {
       const provider = new ethers.JsonRpcProvider(url);
       const wallet = new ethers.Wallet(privateKey, provider);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const factory = new ethers.ContractFactory(abi as any, project.compiledBytecode, wallet);
+      const factory = new ethers.ContractFactory(abi as any, bytecode, wallet);
       const contract = await factory.deploy();
       const receipt = await contract.deploymentTransaction()!.wait(1);
       const contractAddress = await contract.getAddress();
@@ -95,7 +136,21 @@ export async function deployEvm(
         networkLabel: "sepolia",
         explorerUrl: `https://sepolia.etherscan.io/address/${contractAddress}`,
       };
+    });
+
+  // If the caller or env var provides a specific URL, use it directly.
+  if (rpcUrl ?? DEFAULT_EVM_RPC) {
+    return tryEvmUrl((rpcUrl ?? DEFAULT_EVM_RPC)!);
+  }
+
+  // Try each public fallback in order.
+  const errors: string[] = [];
+  for (const url of EVM_RPC_FALLBACKS) {
+    try {
+      console.error(`  Trying Sepolia RPC: ${url}`);
+      return await tryEvmUrl(url);
     } catch (err) {
+      if (isFatalError(err)) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`${url}: ${msg}`);
       console.error(`  Sepolia RPC failed (${url}): ${msg}`);
@@ -176,12 +231,16 @@ async function deploySolanaWithRpc(
   // compiledBytecode is stored as base64-encoded .so bytes on the server.
   const programBytes = Buffer.from(project.compiledBytecode!, "base64");
 
-  const ok = await BpfLoader.load(
-    connection,
-    payerKeypair,
-    programKeypair,
-    programBytes,
-    BPF_LOADER_PROGRAM_ID,
+  // Wrap the BPF load in withRetry so transient 429s are retried on the same
+  // endpoint before falling through to the next one in deploySolana.
+  const ok = await withRetry(() =>
+    BpfLoader.load(
+      connection,
+      payerKeypair,
+      programKeypair,
+      programBytes,
+      BPF_LOADER_PROGRAM_ID,
+    ),
   );
 
   if (!ok) throw new Error("BPF program deployment failed — check your devnet balance.");
@@ -217,13 +276,15 @@ export async function deploySolana(
     return deploySolanaWithRpc(project, walletKey, (rpcUrl ?? DEFAULT_SOL_RPC)!);
   }
 
-  // Try each public fallback in order.
+  // Try each public fallback in order.  deploySolanaWithRpc already applies
+  // withRetry internally for 429s, so errors here are post-retry failures.
   const errors: string[] = [];
   for (const url of SOL_RPC_FALLBACKS) {
     try {
       console.error(`  Trying Solana devnet RPC: ${url}`);
       return await deploySolanaWithRpc(project, walletKey, url);
     } catch (err) {
+      if (isFatalError(err)) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`${url}: ${msg}`);
       console.error(`  Solana devnet RPC failed (${url}): ${msg}`);
@@ -280,10 +341,12 @@ export async function getEvmBalance(
 
     for (const url of urls) {
       try {
-        const provider = new ethers.JsonRpcProvider(url);
-        const bal = await provider.getBalance(address);
-        const balanceEth = parseFloat(ethers.formatEther(bal));
-        return { address, balanceEth };
+        return await withRetry(async () => {
+          const provider = new ethers.JsonRpcProvider(url);
+          const bal = await provider.getBalance(address);
+          const balanceEth = parseFloat(ethers.formatEther(bal));
+          return { address, balanceEth };
+        });
       } catch {
         // try next
       }
@@ -331,10 +394,12 @@ export async function getSolanaBalance(
 
     for (const url of urls) {
       try {
-        const connection = new Connection(url, "confirmed");
-        const lamports = await connection.getBalance(publicKey);
-        const balanceSol = lamports / LAMPORTS_PER_SOL;
-        return { address, balanceSol };
+        return await withRetry(async () => {
+          const connection = new Connection(url, "confirmed");
+          const lamports = await connection.getBalance(publicKey);
+          const balanceSol = lamports / LAMPORTS_PER_SOL;
+          return { address, balanceSol };
+        });
       } catch {
         // try next
       }
