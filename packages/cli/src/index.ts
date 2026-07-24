@@ -454,17 +454,36 @@ async function main() {
     console.log(`  ${c.muted("  No contracts found yet — describe one to forge your first.")}`);
   }
 
-  // Auth status — auto-login if no key is configured
+  // Auth status — prompt signup or login if no key is configured
   if (!cfg.apiKey) {
     console.log();
     console.log(`  ${c.gold(icon.info)} No API key found.`);
-    console.log(`  ${c.muted("Starting login flow…  (Ctrl-C to skip)")} `);
-    await runLogin(cfg.apiUrl);
-    // Reload so the rest of the REPL picks up the newly saved key
-    const fresh = resolveConfig({ apiUrl: flagVal("--api-url"), apiKey: flagVal("--api-key") });
-    (cfg as any).apiKey = fresh.apiKey;
-    if (!cfg.apiKey) {
+
+    if (!process.stdin.isTTY) {
+      // Non-interactive (CI / pipe) — skip the prompt
       console.log(`  ${c.muted("Tip: run")} ${c.cyan("aura-forge login")} ${c.muted("any time to sign in, or")} ${c.cyan("/key <key>")} ${c.muted("to paste a key.")}`);
+    } else {
+      console.log(`  ${c.muted("(Ctrl-C to skip)")}`);
+      console.log();
+
+      // Ask if the user already has an account
+      const answer = await new Promise<string>(resolve =>
+        rl.question(`  ${c.muted("Do you have an account?")} ${c.dim("[Y/n]")} `, resolve)
+      );
+      const hasAccount = answer.trim().toLowerCase() !== "n";
+
+      if (hasAccount) {
+        await runLogin(cfg.apiUrl);
+      } else {
+        await runSignup(cfg.apiUrl);
+      }
+
+      // Reload so the rest of the REPL picks up the newly saved key
+      const fresh = resolveConfig({ apiUrl: flagVal("--api-url"), apiKey: flagVal("--api-key") });
+      (cfg as any).apiKey = fresh.apiKey;
+      if (!cfg.apiKey) {
+        console.log(`  ${c.muted("Tip: run")} ${c.cyan("aura-forge login")} ${c.muted("any time to sign in, or")} ${c.cyan("/key <key>")} ${c.muted("to paste a key.")}`);
+      }
     }
   }
 
