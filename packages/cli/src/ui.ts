@@ -94,6 +94,7 @@ export function printHelp(): void {
   console.log(`  ${c.bold(c.white("Auth"))}`);
   console.log();
   const authCmds: [string, string][] = [
+    ["aura-forge signup",   "Create a new account from the terminal"],
     ["aura-forge login",    "Sign in with email + password (run outside the REPL)"],
     ["aura-forge logout",   "Remove saved credentials"],
     ["aura-forge whoami",   "Show current login status"],

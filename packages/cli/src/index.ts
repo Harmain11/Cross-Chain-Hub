@@ -19,7 +19,7 @@ import {
   type ForgeEvent,
 } from "./forge.js";
 import { deployEvm, deploySolana, resolveWalletKey } from "./deploy.js";
-import { runLogin, runLogout } from "./login.js";
+import { runLogin, runLogout, runSignup } from "./login.js";
 
 // ─── CLI flags ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -30,6 +30,15 @@ const flagVal = (flag: string) => {
 
 // ─── Top-level subcommands (run and exit) ──────────────────────────────────────
 const subcommand = args[0];
+
+if (subcommand === "signup") {
+  const apiUrl =
+    flagVal("--api-url") ??
+    process.env.AURA_FORGE_API_URL ??
+    loadConfig().apiUrl;
+  await runSignup(apiUrl);
+  process.exit(0);
+}
 
 if (subcommand === "login") {
   const apiUrl =
@@ -61,6 +70,7 @@ if (args.includes("--help") || args.includes("-h")) {
   ${c.bold(c.white("aura-forge"))} [command] [options]
 
   ${c.muted("Commands:")}
+    signup             Create a new account from the terminal
     login              Sign in with email + password (saves API key automatically)
     logout             Remove saved credentials
     whoami             Show whether you are currently logged in

@@ -174,6 +174,105 @@ export async function runLogin(apiUrl: string): Promise<void> {
   }
 }
 
+// ─── Signup ───────────────────────────────────────────────────────────────────
+
+export async function runSignup(apiUrl: string): Promise<void> {
+  console.log();
+  console.log(`  ${c.cyan(icon.forge)} ${c.bold(c.white("AURA Forge — Create Account"))}`);
+  console.log(`  ${c.muted("Enter a new email address and a password (min 8 characters).")}`);
+  console.log(`  ${c.muted("Already have an account?")} ${c.cyan("aura-forge login")}`);
+  console.log();
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+  let email: string;
+  try {
+    email = (await ask(rl, `  ${c.muted("Email")}             ${c.dim("›")} `)).trim();
+  } finally {
+    rl.close();
+  }
+
+  if (!email) {
+    console.log(`  ${c.red(icon.cross)} Email is required.\n`);
+    return;
+  }
+
+  const password = await readPassword(`  ${c.muted("Password")}          ${c.dim("›")} `);
+
+  if (!password) {
+    console.log(`  ${c.red(icon.cross)} Password is required.\n`);
+    return;
+  }
+
+  const confirm = await readPassword(`  ${c.muted("Confirm password")} ${c.dim("›")} `);
+
+  if (password !== confirm) {
+    console.log(`  ${c.red(icon.cross)} Passwords do not match.\n`);
+    return;
+  }
+
+  console.log();
+  const spinner = ora({ text: c.muted("Creating account…"), indent: 2 }).start();
+
+  try {
+    // ── Step 1: Create account ──────────────────────────────────────────────
+    const signupRes = await fetch(`${apiUrl}/api/auth/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+
+    if (!signupRes.ok) {
+      const body = await signupRes.json().catch(() => ({})) as { error?: string };
+      const msg = body.error ?? `Signup failed (HTTP ${signupRes.status})`;
+      spinner.fail(c.red(msg));
+      if (signupRes.status === 409) {
+        console.log(`  ${c.muted("Already have an account? Run")} ${c.cyan("aura-forge login")}`);
+      }
+      return;
+    }
+
+    // Extract session cookie so we can call authenticated endpoints
+    const rawCookie = signupRes.headers.get("set-cookie") ?? "";
+    const cookieHeader = rawCookie.split(";")[0].trim();
+    if (!cookieHeader) {
+      spinner.fail(c.red("Server did not return a session cookie. Is the API server reachable?"));
+      return;
+    }
+
+    spinner.text = c.muted("Creating CLI API key…");
+
+    // ── Step 2: Create a named API key via the session ──────────────────────
+    const keyRes = await fetch(`${apiUrl}/api/api-keys`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify({ label: "CLI" }),
+    });
+
+    if (!keyRes.ok) {
+      const body = await keyRes.json().catch(() => ({})) as { error?: string };
+      spinner.fail(c.red(`Failed to create API key: ${body.error ?? `HTTP ${keyRes.status}`}`));
+      return;
+    }
+
+    const keyData = (await keyRes.json()) as { fullKey: string };
+
+    // ── Step 3: Persist ─────────────────────────────────────────────────────
+    saveConfig({ apiKey: keyData.fullKey });
+
+    spinner.succeed(c.green("Account created"));
+    console.log();
+    console.log(`  ${c.dim(icon.dot)} API key saved to ${c.muted("~/.aura-forge/config.json")}`);
+    console.log(`  ${c.muted("Run")} ${c.cyan("aura-forge")} ${c.muted("to start forging contracts.")}`);
+    console.log();
+  } catch (err) {
+    spinner.fail(c.red(err instanceof Error ? err.message : "Unexpected error during signup"));
+  }
+}
+
 // ─── Logout ───────────────────────────────────────────────────────────────────
 
 export function runLogout(): void {
