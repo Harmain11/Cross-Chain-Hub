@@ -45,6 +45,28 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Check version consistency
+        run: |
+          CLI_VERSION=$(node -p "require('./packages/cli/package.json').version")
+          MCP_VERSION=$(node -p "require('./packages/mcp/package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          echo "CLI version:  $CLI_VERSION"
+          echo "MCP version:  $MCP_VERSION"
+          echo "Tag version:  $TAG_VERSION"
+
+          if [ "$CLI_VERSION" != "$MCP_VERSION" ]; then
+            echo "::error::Version mismatch: @aura-forge/cli is $CLI_VERSION but @aura-forge/mcp is $MCP_VERSION. Bump both to the same version before releasing."
+            exit 1
+          fi
+
+          if [ "$CLI_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Version mismatch: package.json files say $CLI_VERSION but the git tag is $GITHUB_REF_NAME. Ensure both package.json files match the tag version."
+            exit 1
+          fi
+
+          echo "Version check passed — both packages are at $CLI_VERSION and match the tag."
+
       - name: Build CLI
         run: pnpm --filter @aura-forge/cli run build
 
