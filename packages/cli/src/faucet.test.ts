@@ -15,11 +15,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockSpinnerStop = vi.fn();
 const mockSpinnerFail = vi.fn();
 const mockSpinnerSucceed = vi.fn();
+const mockSpinnerWarn = vi.fn();
 const mockSpinner = {
   start: vi.fn().mockReturnThis(),
   stop: mockSpinnerStop,
   fail: mockSpinnerFail,
   succeed: mockSpinnerSucceed,
+  warn: mockSpinnerWarn,
   set text(_: string) {},
 };
 
@@ -290,6 +292,41 @@ describe("runFaucet()", () => {
             l.includes("explorer.solana.com/tx/airdrop-sig-abc123") &&
             l.includes("cluster=devnet"),
         ),
+      ).toBe(true);
+    });
+  });
+
+  // ── 3b. Solana getBalance timeout ───────────────────────────────────────────
+  describe("SOLANA chain — post-airdrop balance check timeout", () => {
+    it("completes and prints airdrop details even when getBalance never resolves", async () => {
+      // getBalance hangs forever
+      mockSolGetBalance.mockReturnValue(new Promise(() => {}));
+
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      vi.useFakeTimers();
+      const faucetPromise = runFaucet("ValidBase58Key", "SOLANA");
+      await vi.advanceTimersByTimeAsync(6_000);
+      await faucetPromise;
+      vi.useRealTimers();
+
+      // Airdrop confirmation must still have been shown
+      expect(mockSpinnerSucceed).toHaveBeenCalledWith(
+        expect.stringContaining("Airdrop confirmed"),
+      );
+      // Balance spinner should warn (not succeed) because getBalance timed out
+      expect(mockSpinnerWarn).toHaveBeenCalledWith(
+        expect.stringContaining("Could not fetch updated balance"),
+      );
+      expect(mockSpinnerSucceed).not.toHaveBeenCalledWith(
+        expect.stringContaining("New balance"),
+      );
+      // Explorer link must still appear
+      expect(
+        logs.some((l) => l.includes("explorer.solana.com/tx/airdrop-sig-abc123")),
       ).toBe(true);
     });
   });

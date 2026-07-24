@@ -164,13 +164,29 @@ export async function runFaucet(
 
       spinner.succeed(c.green("Airdrop confirmed"));
 
-      // Fetch and display the resulting balance as a separate, explicit step
+      // Fetch and display the resulting balance as a separate, explicit step.
+      // Wrapped with a 5-second timeout so a slow Devnet RPC node cannot hang
+      // the command after the airdrop is already confirmed.
       const balSpinner = ora({ text: c.muted("Fetching updated balance…"), indent: 2 }).start();
       let sol: number;
       try {
-        const lamports = await connection.getBalance(keypair.publicKey);
-        sol = lamports / LAMPORTS_PER_SOL;
-        balSpinner.succeed(c.dim(`New balance: ${c.white(sol.toFixed(6) + " SOL")} (Devnet)`));
+        const balController = new AbortController();
+        const balTimeoutId = setTimeout(() => balController.abort(), 5_000);
+        try {
+          const lamports = await Promise.race([
+            connection.getBalance(keypair.publicKey),
+            new Promise<never>((_, reject) =>
+              balController.signal.addEventListener("abort", () =>
+                reject(new Error("Balance check timed out")),
+              ),
+            ),
+          ]);
+          clearTimeout(balTimeoutId);
+          sol = lamports / LAMPORTS_PER_SOL;
+          balSpinner.succeed(c.dim(`New balance: ${c.white(sol.toFixed(6) + " SOL")} (Devnet)`));
+        } finally {
+          clearTimeout(balTimeoutId);
+        }
       } catch {
         balSpinner.warn(c.gold("Could not fetch updated balance — funds may still have arrived."));
         sol = 0;
