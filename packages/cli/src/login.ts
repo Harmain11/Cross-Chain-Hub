@@ -159,10 +159,10 @@ export async function runLogin(apiUrl: string): Promise<void> {
       return;
     }
 
-    const keyData = (await keyRes.json()) as { fullKey: string };
+    const keyData = (await keyRes.json()) as { id: number; fullKey: string };
 
     // ── Step 3: Persist ─────────────────────────────────────────────────────
-    saveConfig({ apiKey: keyData.fullKey });
+    saveConfig({ apiKey: keyData.fullKey, apiKeyId: keyData.id });
 
     spinner.succeed(c.green("Signed in"));
     console.log();
@@ -258,10 +258,10 @@ export async function runSignup(apiUrl: string): Promise<void> {
       return;
     }
 
-    const keyData = (await keyRes.json()) as { fullKey: string };
+    const keyData = (await keyRes.json()) as { id: number; fullKey: string };
 
     // ── Step 3: Persist ─────────────────────────────────────────────────────
-    saveConfig({ apiKey: keyData.fullKey });
+    saveConfig({ apiKey: keyData.fullKey, apiKeyId: keyData.id });
 
     spinner.succeed(c.green("Account created"));
     console.log();
@@ -305,45 +305,59 @@ export async function runLogout(apiUrl: string): Promise<void> {
 
   let serverRevoked = false;
   try {
-    // ── Step 1: List keys (authenticated with the stored API key) ────────────
-    const listRes = await fetch(`${apiUrl}/api/api-keys`, {
-      headers: { Authorization: `Bearer ${cfg.apiKey}` },
-    });
-
-    if (listRes.ok) {
-      const keys = (await listRes.json()) as Array<{
-        id: number;
-        label: string;
-        keyPrefix: string;
-        revokedAt: string | null;
-      }>;
-
-      // The full key starts with the keyPrefix stored on the server
-      const localPrefix = cfg.apiKey.slice(0, 14); // "af_live_" (8) + 6 chars
-      const match = keys.find(k => !k.revokedAt && k.keyPrefix === localPrefix);
-
-      if (match) {
-        // ── Step 2: Revoke the matching key ──────────────────────────────────
-        const delRes = await fetch(`${apiUrl}/api/api-keys/${match.id}`, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${cfg.apiKey}` },
-        });
-        serverRevoked = delRes.ok || delRes.status === 404;
-        if (!serverRevoked) {
-          spinner.warn(
-            c.gold(`Could not revoke key on server (HTTP ${delRes.status}). ` +
-              `Removing locally — the key may still be active.`),
-          );
-        }
-      } else {
-        // Key was already revoked or not found — nothing to do server-side
-        serverRevoked = true;
+    if (cfg.apiKeyId != null) {
+      // ── Fast path: DELETE directly using the stored key ID ─────────────────
+      const delRes = await fetch(`${apiUrl}/api/api-keys/${cfg.apiKeyId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${cfg.apiKey}` },
+      });
+      serverRevoked = delRes.ok || delRes.status === 404;
+      if (!serverRevoked) {
+        spinner.warn(
+          c.gold(`Could not revoke key on server (HTTP ${delRes.status}). ` +
+            `Removing locally — the key may still be active.`),
+        );
       }
     } else {
-      spinner.warn(
-        c.gold(`Could not reach server to revoke key (HTTP ${listRes.status}). ` +
-          `Removing locally — the key may still be active.`),
-      );
+      // ── Fallback: List keys and find by prefix ──────────────────────────────
+      const listRes = await fetch(`${apiUrl}/api/api-keys`, {
+        headers: { Authorization: `Bearer ${cfg.apiKey}` },
+      });
+
+      if (listRes.ok) {
+        const keys = (await listRes.json()) as Array<{
+          id: number;
+          label: string;
+          keyPrefix: string;
+          revokedAt: string | null;
+        }>;
+
+        // The full key starts with the keyPrefix stored on the server
+        const localPrefix = cfg.apiKey.slice(0, 14); // "af_live_" (8) + 6 chars
+        const match = keys.find(k => !k.revokedAt && k.keyPrefix === localPrefix);
+
+        if (match) {
+          const delRes = await fetch(`${apiUrl}/api/api-keys/${match.id}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${cfg.apiKey}` },
+          });
+          serverRevoked = delRes.ok || delRes.status === 404;
+          if (!serverRevoked) {
+            spinner.warn(
+              c.gold(`Could not revoke key on server (HTTP ${delRes.status}). ` +
+                `Removing locally — the key may still be active.`),
+            );
+          }
+        } else {
+          // Key was already revoked or not found — nothing to do server-side
+          serverRevoked = true;
+        }
+      } else {
+        spinner.warn(
+          c.gold(`Could not reach server to revoke key (HTTP ${listRes.status}). ` +
+            `Removing locally — the key may still be active.`),
+        );
+      }
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -353,9 +367,9 @@ export async function runLogout(apiUrl: string): Promise<void> {
     );
   }
 
-  // ── Step 3: Always clear local config ────────────────────────────────────
-  // Remove the apiKey by writing undefined — JSON.stringify drops undefined fields
-  saveConfig({ apiKey: undefined });
+  // ── Always clear local config ─────────────────────────────────────────────
+  // Remove the apiKey and apiKeyId by writing undefined — JSON.stringify drops undefined fields
+  saveConfig({ apiKey: undefined, apiKeyId: undefined });
 
   if (serverRevoked) {
     spinner.succeed(c.green("Logged out — API key revoked on server and removed locally."));

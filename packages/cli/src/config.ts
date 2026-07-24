@@ -5,6 +5,8 @@ import os from "os";
 export interface AuraConfig {
   apiUrl: string;
   apiKey?: string;
+  /** The server-assigned ID of the stored CLI API key; used to skip the list round-trip on logout. */
+  apiKeyId?: number;
   defaultChain: "EVM" | "SOLANA";
   /** Private key for testnet deployments. EVM: hex key. Solana: JSON byte-array or base58. */
   walletPrivateKey?: string;
