@@ -20,13 +20,23 @@ export type DeployResult = {
 
 // ─── EVM / Sepolia ────────────────────────────────────────────────────────────
 
-const DEFAULT_EVM_RPC =
-  process.env.AURA_FORGE_EVM_RPC_URL ?? "https://rpc2.sepolia.org";
+/**
+ * Public Sepolia RPC endpoints tried in order.
+ * Set AURA_FORGE_EVM_RPC_URL to skip the fallback list entirely.
+ */
+const EVM_RPC_FALLBACKS = [
+  "https://rpc2.sepolia.org",
+  "https://sepolia.drpc.org",
+  "https://ethereum-sepolia-rpc.publicnode.com",
+  "https://1rpc.io/sepolia",
+];
+
+const DEFAULT_EVM_RPC = process.env.AURA_FORGE_EVM_RPC_URL ?? null;
 
 export async function deployEvm(
   project: FullForgeProject,
   privateKey: string,
-  rpcUrl = DEFAULT_EVM_RPC,
+  rpcUrl?: string,
 ): Promise<DeployResult> {
   if (!project.compiledBytecode) {
     throw new Error(
@@ -47,28 +57,72 @@ export async function deployEvm(
     }
   }
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
-  const wallet = new ethers.Wallet(privateKey, provider);
+  // If the caller or env var provides a specific URL, use it directly.
+  if (rpcUrl ?? DEFAULT_EVM_RPC) {
+    const url = (rpcUrl ?? DEFAULT_EVM_RPC)!;
+    const provider = new ethers.JsonRpcProvider(url);
+    const wallet = new ethers.Wallet(privateKey, provider);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const factory = new ethers.ContractFactory(abi as any, project.compiledBytecode, wallet);
+    const contract = await factory.deploy();
+    const receipt = await contract.deploymentTransaction()!.wait(1);
+    const contractAddress = await contract.getAddress();
+    const txHash = receipt?.hash ?? contract.deploymentTransaction()!.hash;
+    return {
+      txHash,
+      contractAddress,
+      networkLabel: "sepolia",
+      explorerUrl: `https://sepolia.etherscan.io/address/${contractAddress}`,
+    };
+  }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const factory = new ethers.ContractFactory(abi as any, project.compiledBytecode, wallet);
-  const contract = await factory.deploy();
-  const receipt = await contract.deploymentTransaction()!.wait(1);
-  const contractAddress = await contract.getAddress();
-  const txHash = receipt?.hash ?? contract.deploymentTransaction()!.hash;
+  // Try each public fallback in order.
+  const errors: string[] = [];
+  for (const url of EVM_RPC_FALLBACKS) {
+    try {
+      console.error(`  Trying Sepolia RPC: ${url}`);
+      const provider = new ethers.JsonRpcProvider(url);
+      const wallet = new ethers.Wallet(privateKey, provider);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const factory = new ethers.ContractFactory(abi as any, project.compiledBytecode, wallet);
+      const contract = await factory.deploy();
+      const receipt = await contract.deploymentTransaction()!.wait(1);
+      const contractAddress = await contract.getAddress();
+      const txHash = receipt?.hash ?? contract.deploymentTransaction()!.hash;
+      return {
+        txHash,
+        contractAddress,
+        networkLabel: "sepolia",
+        explorerUrl: `https://sepolia.etherscan.io/address/${contractAddress}`,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${url}: ${msg}`);
+      console.error(`  Sepolia RPC failed (${url}): ${msg}`);
+    }
+  }
 
-  return {
-    txHash,
-    contractAddress,
-    networkLabel: "sepolia",
-    explorerUrl: `https://sepolia.etherscan.io/address/${contractAddress}`,
-  };
+  throw new Error(
+    "All public Sepolia RPC endpoints failed:\n" +
+      errors.map((e) => `  • ${e}`).join("\n") +
+      "\n\nFix: set AURA_FORGE_EVM_RPC_URL to a private Infura or Alchemy endpoint:\n" +
+      "  export AURA_FORGE_EVM_RPC_URL=https://sepolia.infura.io/v3/<YOUR_KEY>",
+  );
 }
 
 // ─── Solana / Devnet ──────────────────────────────────────────────────────────
 
-const DEFAULT_SOL_RPC =
-  process.env.AURA_FORGE_SOL_RPC_URL ?? "https://api.devnet.solana.com";
+/**
+ * Public Solana devnet RPC endpoints tried in order.
+ * Set AURA_FORGE_SOL_RPC_URL to skip the fallback list entirely.
+ */
+const SOL_RPC_FALLBACKS = [
+  "https://api.devnet.solana.com",
+  "https://devnet.helius-rpc.com/?api-key=public",
+  "https://solana-devnet-rpc.publicnode.com",
+];
+
+const DEFAULT_SOL_RPC = process.env.AURA_FORGE_SOL_RPC_URL ?? null;
 
 /**
  * Parse a Solana wallet key.
@@ -107,18 +161,11 @@ export async function parseSolanaKeypair(raw: string) {
   }
 }
 
-export async function deploySolana(
+async function deploySolanaWithRpc(
   project: FullForgeProject,
   walletKey: string,
-  rpcUrl = DEFAULT_SOL_RPC,
+  rpcUrl: string,
 ): Promise<DeployResult> {
-  if (!project.compiledBytecode) {
-    throw new Error(
-      "No compiled program binary available for this project.\n" +
-        "  Re-forge the contract so the server stores its compiled .so bytes.",
-    );
-  }
-
   const { Connection, Keypair, BpfLoader, BPF_LOADER_PROGRAM_ID } =
     await import("@solana/web3.js");
 
@@ -127,7 +174,7 @@ export async function deploySolana(
   const programKeypair = Keypair.generate();
 
   // compiledBytecode is stored as base64-encoded .so bytes on the server.
-  const programBytes = Buffer.from(project.compiledBytecode, "base64");
+  const programBytes = Buffer.from(project.compiledBytecode!, "base64");
 
   const ok = await BpfLoader.load(
     connection,
@@ -151,6 +198,44 @@ export async function deploySolana(
     networkLabel: "devnet",
     explorerUrl: `https://explorer.solana.com/address/${programId}?cluster=devnet`,
   };
+}
+
+export async function deploySolana(
+  project: FullForgeProject,
+  walletKey: string,
+  rpcUrl?: string,
+): Promise<DeployResult> {
+  if (!project.compiledBytecode) {
+    throw new Error(
+      "No compiled program binary available for this project.\n" +
+        "  Re-forge the contract so the server stores its compiled .so bytes.",
+    );
+  }
+
+  // If the caller or env var provides a specific URL, use it directly.
+  if (rpcUrl ?? DEFAULT_SOL_RPC) {
+    return deploySolanaWithRpc(project, walletKey, (rpcUrl ?? DEFAULT_SOL_RPC)!);
+  }
+
+  // Try each public fallback in order.
+  const errors: string[] = [];
+  for (const url of SOL_RPC_FALLBACKS) {
+    try {
+      console.error(`  Trying Solana devnet RPC: ${url}`);
+      return await deploySolanaWithRpc(project, walletKey, url);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${url}: ${msg}`);
+      console.error(`  Solana devnet RPC failed (${url}): ${msg}`);
+    }
+  }
+
+  throw new Error(
+    "All public Solana devnet RPC endpoints failed:\n" +
+      errors.map((e) => `  • ${e}`).join("\n") +
+      "\n\nFix: set AURA_FORGE_SOL_RPC_URL to a private Helius or QuickNode devnet endpoint:\n" +
+      "  export AURA_FORGE_SOL_RPC_URL=https://devnet.helius-rpc.com/?api-key=<YOUR_KEY>",
+  );
 }
 
 // ─── Wallet key resolution ────────────────────────────────────────────────────
