@@ -269,7 +269,24 @@ export async function runSignup(apiUrl: string): Promise<void> {
     console.log(`  ${c.muted("Run")} ${c.cyan("aura-forge")} ${c.muted("to start forging contracts.")}`);
     console.log();
   } catch (err) {
-    spinner.fail(c.red(err instanceof Error ? err.message : "Unexpected error during signup"));
+    const msg = err instanceof Error ? err.message : String(err);
+    const isNetworkError =
+      err instanceof TypeError &&
+      (msg.includes("fetch failed") ||
+        msg.includes("ECONNREFUSED") ||
+        msg.includes("ENOTFOUND") ||
+        msg.includes("network"));
+    if (isNetworkError) {
+      spinner.fail(c.red("Could not reach the AURA Forge server."));
+      console.log(
+        `  ${c.muted("Check your network connection, or verify the server URL is correct.")}`,
+      );
+      console.log(
+        `  ${c.muted("You can also run")} ${c.cyan("aura-forge --help")} ${c.muted("to see available options.")}`,
+      );
+    } else {
+      spinner.fail(c.red(msg || "Unexpected error during signup"));
+    }
   }
 }
 
