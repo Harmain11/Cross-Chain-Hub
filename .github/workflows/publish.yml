@@ -76,6 +76,45 @@ jobs:
       # Both builds must succeed before either package is published.
       # If either step above fails, the job stops here and nothing is published.
 
+      - name: Pack packages
+        run: |
+          mkdir -p /tmp/smoke-tarballs
+          pnpm --filter @aura-forge/cli pack --pack-destination /tmp/smoke-tarballs
+          pnpm --filter @aura-forge/mcp pack --pack-destination /tmp/smoke-tarballs
+          echo "Packed tarballs:"
+          ls -lh /tmp/smoke-tarballs/
+
+      - name: Smoke test — install from tarballs and invoke binaries
+        run: |
+          set -euo pipefail
+
+          CLI_TARBALL=$(ls /tmp/smoke-tarballs/aura-forge-cli-*.tgz)
+          MCP_TARBALL=$(ls /tmp/smoke-tarballs/aura-forge-mcp-*.tgz)
+
+          echo "CLI tarball: $CLI_TARBALL"
+          echo "MCP tarball: $MCP_TARBALL"
+
+          SMOKE_DIR=$(mktemp -d)
+          echo "Smoke-test dir: $SMOKE_DIR"
+
+          # Install both packages into an isolated directory so nothing leaks
+          # from the monorepo's node_modules.
+          npm install --prefix "$SMOKE_DIR" "$CLI_TARBALL" "$MCP_TARBALL"
+
+          CLI_BIN="$SMOKE_DIR/node_modules/.bin/aura-forge"
+          MCP_BIN="$SMOKE_DIR/node_modules/.bin/aura-forge-mcp"
+
+          echo ""
+          echo "── aura-forge --help ──────────────────────────────"
+          "$CLI_BIN" --help
+
+          echo ""
+          echo "── aura-forge-mcp --help ──────────────────────────"
+          "$MCP_BIN" --help
+
+          echo ""
+          echo "✓ Smoke test passed — both binaries are executable and respond to --help."
+
       - name: Publish CLI
         run: pnpm --filter @aura-forge/cli publish --no-git-checks
         env:

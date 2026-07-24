@@ -23,6 +23,35 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+// ─── --help / --version (smoke-test targets) ──────────────────────────────────
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  console.log(`
+  aura-forge-mcp — AURA Forge MCP Server
+
+  Exposes smart-contract generation and audit tools to Claude Desktop,
+  Claude Code, and any MCP-compatible client via the Model Context Protocol.
+
+  Usage:
+    aura-forge-mcp
+
+  Environment variables:
+    AURA_FORGE_API_KEY   Your AURA Forge API key (required for tool calls)
+    AURA_FORGE_API_URL   API server URL (default: https://aura-forge.replit.app)
+
+  Typical claude_desktop_config.json entry:
+    {
+      "mcpServers": {
+        "aura-forge": {
+          "command": "npx",
+          "args": ["@aura-forge/mcp"],
+          "env": { "AURA_FORGE_API_KEY": "af_..." }
+        }
+      }
+    }
+`);
+  process.exit(0);
+}
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 const API_URL  = process.env.AURA_FORGE_API_URL ?? "https://aura-forge.replit.app";
 const API_KEY  = process.env.AURA_FORGE_API_KEY ?? "";
