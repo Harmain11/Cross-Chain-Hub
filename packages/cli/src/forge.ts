@@ -21,6 +21,15 @@ export interface ForgeProject {
   createdAt: string;
 }
 
+/** Extended project shape returned by GET /api/projects/:id — includes compiled artifacts. */
+export interface FullForgeProject extends ForgeProject {
+  compiledBytecode?: string | null;
+  abiOrIdl?: string | null;
+  networkSelected?: string | null;
+  deploymentTxHash?: string | null;
+  liveDeployedAddress?: string | null;
+}
+
 function headers(cfg: AuraConfig): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
   if (cfg.apiKey) h["Authorization"] = `Bearer ${cfg.apiKey}`;
@@ -98,11 +107,29 @@ export async function listProjects(cfg: AuraConfig): Promise<ForgeProject[]> {
   return (await res.json()) as ForgeProject[];
 }
 
-/** Get a single project by id. */
-export async function getProject(cfg: AuraConfig, id: number): Promise<ForgeProject> {
+/** Get a single project by id (includes compiledBytecode and abiOrIdl). */
+export async function getProject(cfg: AuraConfig, id: number): Promise<FullForgeProject> {
   const res = await fetch(`${cfg.apiUrl}/api/projects/${id}`, { headers: headers(cfg) });
   if (!res.ok) throw new Error(`API error ${res.status}`);
-  return (await res.json()) as ForgeProject;
+  return (await res.json()) as FullForgeProject;
+}
+
+/** Record a completed deployment against a project. */
+export async function recordDeployment(
+  cfg: AuraConfig,
+  projectId: number,
+  opts: { networkSelected: string; deploymentTxHash: string; liveDeployedAddress: string },
+): Promise<void> {
+  const url = `${cfg.apiUrl}/api/projects/${projectId}/deploy`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: headers(cfg),
+    body: JSON.stringify(opts),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to record deployment (${res.status}): ${body}`);
+  }
 }
 
 /** Derive a clean contract name from a natural-language prompt. */

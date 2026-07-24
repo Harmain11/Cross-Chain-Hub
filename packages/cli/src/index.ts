@@ -13,9 +13,12 @@ import {
   streamForgeJob,
   listProjects,
   deriveContractName,
+  getProject,
+  recordDeployment,
   type Chain,
   type ForgeEvent,
 } from "./forge.js";
+import { deployEvm, deploySolana, resolveWalletKey } from "./deploy.js";
 import { runLogin, runLogout } from "./login.js";
 
 // ─── CLI flags ─────────────────────────────────────────────────────────────────
@@ -228,6 +231,87 @@ async function auditFile(query: string) {
   await forge(auditPrompt);
 }
 
+// ─── /deploy command ───────────────────────────────────────────────────────────
+async function deployCommand(arg: string) {
+  if (!cfg.apiKey) {
+    console.log();
+    console.log(`  ${c.red(icon.cross)} Not logged in. Run ${c.cyan("aura-forge login")} first.`);
+    return;
+  }
+
+  // Resolve wallet key: env → config
+  const walletKey = resolveWalletKey(cfg.walletPrivateKey);
+  if (!walletKey) {
+    console.log();
+    console.log(`  ${c.red(icon.cross)} No wallet key configured.`);
+    console.log(`  ${c.muted("Set one with")} ${c.cyan("/wallet <key>")} ${c.muted("or export")} ${c.cyan("AURA_FORGE_WALLET_KEY=<key>")}`);
+    console.log(`  ${c.muted("EVM: hex private key   Solana: JSON byte-array or base58 secret key")}`);
+    return;
+  }
+
+  // Resolve project ID — arg must be a numeric ID
+  const projectId = parseInt(arg, 10);
+  if (isNaN(projectId)) {
+    console.log();
+    console.log(`  ${c.red(icon.cross)} Provide a numeric project ID, e.g. ${c.cyan("/deploy 42")}`);
+    console.log(`  ${c.muted("Find your project IDs in the web dashboard or via the API.")}`);
+    return;
+  }
+
+  console.log();
+  const spinner = ora({ text: c.muted(`Fetching project ${projectId}…`), indent: 2 }).start();
+  let project;
+  try {
+    project = await getProject(cfg, projectId);
+    spinner.stop();
+  } catch (err) {
+    spinner.fail(c.red(`Failed to fetch project: ${err instanceof Error ? err.message : err}`));
+    return;
+  }
+
+  if (project.status !== "success" || !project.smartContractCode) {
+    console.log(`  ${c.red(icon.cross)} Project ${projectId} is not in a deployable state (status: ${project.status}).`);
+    return;
+  }
+
+  const networkLabel = project.ecosystem === "EVM" ? c.cyan("Sepolia") : c.purple("Devnet");
+  console.log(`  ${c.cyan(icon.forge)} ${c.bold(c.white(project.contractName))}  ${c.dim("·")}  Deploying to ${networkLabel}`);
+  console.log();
+
+  const deploySpinner = ora({ text: c.muted("Deploying…"), indent: 2 }).start();
+  try {
+    const result = project.ecosystem === "EVM"
+      ? await deployEvm(project, walletKey)
+      : await deploySolana(project, walletKey);
+
+    deploySpinner.succeed(c.green("Deployed"));
+
+    console.log();
+    console.log(`  ${c.green(icon.check)} Contract address  ${c.white(result.contractAddress)}`);
+    console.log(`  ${c.green(icon.check)} Transaction hash  ${c.white(result.txHash)}`);
+    console.log(`  ${c.dim("Explorer →")}  ${c.cyan(result.explorerUrl)}`);
+
+    // Record the deployment on the server
+    const recSpinner = ora({ text: c.muted("Recording deployment…"), indent: 2 }).start();
+    try {
+      await recordDeployment(cfg, projectId, {
+        networkSelected: result.networkLabel,
+        deploymentTxHash: result.txHash,
+        liveDeployedAddress: result.contractAddress,
+      });
+      recSpinner.succeed(c.dim("Deployment recorded"));
+    } catch (err) {
+      recSpinner.warn(c.gold(`Could not record deployment: ${err instanceof Error ? err.message : err}`));
+    }
+
+    console.log();
+    console.log(`  ${c.dim("View on web →")} ${c.cyan(`${cfg.apiUrl}/projects/${projectId}`)}`);
+
+  } catch (err) {
+    deploySpinner.fail(c.red(err instanceof Error ? err.message : String(err)));
+  }
+}
+
 // ─── /list command ─────────────────────────────────────────────────────────────
 function listWorkspace() {
   console.log();
@@ -322,6 +406,23 @@ async function main() {
       saveConfig({ apiKey: key });
       (cfg as any).apiKey = key;
       console.log(`  ${c.green(icon.check)} API key saved to ${c.muted("~/.aura-forge/config.json")}`);
+      prompt();
+      return;
+    }
+
+    if (line.startsWith("/wallet ")) {
+      const key = line.slice(8).trim();
+      saveConfig({ walletPrivateKey: key });
+      (cfg as any).walletPrivateKey = key;
+      console.log(`  ${c.green(icon.check)} Wallet key saved to ${c.muted("~/.aura-forge/config.json")}`);
+      console.log(`  ${c.gold(icon.info)} Keep this file private — it contains your wallet key.`);
+      prompt();
+      return;
+    }
+
+    if (line.startsWith("/deploy ")) {
+      const arg = line.slice(8).trim();
+      await deployCommand(arg);
       prompt();
       return;
     }

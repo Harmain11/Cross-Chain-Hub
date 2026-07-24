@@ -78,8 +78,10 @@ export function printHelp(): void {
   console.log();
   const cmds: [string, string][] = [
     ["/audit <file>",       "Audit an existing .sol or .rs contract in your workspace"],
+    ["/deploy <project-id>","Deploy a forged contract to Sepolia (EVM) or Devnet (Solana)"],
     ["/list",               "List all contracts found in the current workspace"],
     ["/chain [evm|solana]", "Switch default chain (current session)"],
+    ["/wallet <key>",       "Set wallet private key for deployments (saved to config)"],
     ["/save <path>",        "Set output directory for generated contracts"],
     ["/key <api-key>",      "Paste an API key directly (or run aura-forge login instead)"],
     ["/help",               "Show this help"],

@@ -6,6 +6,8 @@ export interface AuraConfig {
   apiUrl: string;
   apiKey?: string;
   defaultChain: "EVM" | "SOLANA";
+  /** Private key for testnet deployments. EVM: hex key. Solana: JSON byte-array or base58. */
+  walletPrivateKey?: string;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".aura-forge");
