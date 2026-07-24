@@ -412,6 +412,33 @@ describe("runFaucet()", () => {
       expect(mockRequestAirdrop).not.toHaveBeenCalled();
     });
 
+    // ── 4d. getVersion never resolves → timeout → "Cannot reach Devnet RPC" ──
+    it("fails promptly with 'Cannot reach Devnet RPC' when getVersion never resolves", async () => {
+      // Simulate a TCP-level hang: the promise never settles
+      mockGetVersion.mockReturnValue(new Promise(() => {}));
+
+      const logs: string[] = [];
+      vi.spyOn(console, "log").mockImplementation((...args) =>
+        void logs.push(args.join(" ")),
+      );
+
+      vi.useFakeTimers();
+      const faucetPromise = runFaucet("ValidBase58Key", "SOLANA");
+      // Advance past the 8-second pre-flight timeout
+      await vi.advanceTimersByTimeAsync(9_000);
+      await faucetPromise;
+      vi.useRealTimers();
+
+      // Must fail with the timeout-specific message
+      expect(mockSpinnerFail).toHaveBeenCalledWith(
+        expect.stringContaining("Cannot reach Devnet RPC"),
+      );
+      // Must NOT proceed to the airdrop
+      expect(mockRequestAirdrop).not.toHaveBeenCalled();
+      // Must still provide the manual faucet link
+      expect(logs.some((l) => l.includes("faucet.solana.com"))).toBe(true);
+    });
+
     it("includes a link to faucet.solana.com for both failure types", async () => {
       for (const errMsg of ["ECONNREFUSED", "503 Service Unavailable"]) {
         vi.clearAllMocks();

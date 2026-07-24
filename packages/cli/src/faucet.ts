@@ -118,17 +118,38 @@ export async function runFaucet(
       const connection = new Connection(rpcUrl, "confirmed");
 
       // ── Pre-flight connectivity check ────────────────────────────────────
+      // Wrapped with an 8-second timeout so a slow or unresponsive Devnet RPC
+      // (e.g. a TCP timeout rather than an immediate ECONNREFUSED) cannot stall
+      // the command for the OS-level socket timeout (often 30–120 s).
+      const PREFLIGHT_TIMEOUT_MS = 8_000;
+      const PREFLIGHT_TIMEOUT_SENTINEL = "__PREFLIGHT_TIMEOUT__";
       spinner.text = c.muted("Checking Devnet connectivity…");
       try {
-        await connection.getVersion();
+        await Promise.race([
+          connection.getVersion(),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error(PREFLIGHT_TIMEOUT_SENTINEL)),
+              PREFLIGHT_TIMEOUT_MS,
+            ),
+          ),
+        ]);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        const isTimeout = msg === PREFLIGHT_TIMEOUT_SENTINEL;
         const isNetworkError =
+          !isTimeout &&
           /ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|Failed to fetch|fetch failed|network error|getaddrinfo/i.test(
             msg,
           );
 
-        if (isNetworkError) {
+        if (isTimeout) {
+          spinner.fail(c.red("Cannot reach Devnet RPC"));
+          console.log();
+          console.log(
+            `  ${c.red(icon.cross)} Cannot reach Devnet RPC — connection timed out after ${PREFLIGHT_TIMEOUT_MS / 1_000} s.`,
+          );
+        } else if (isNetworkError) {
           spinner.fail(c.red("You appear to be offline"));
           console.log();
           console.log(
