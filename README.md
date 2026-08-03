@@ -32,25 +32,15 @@ It supports two ecosystems:
 
 ```mermaid
 flowchart TD
-    A([🖥️ Input: CLI / MCP]) --> B[LangGraph Router]
-    B --> C[Smart Contract Generator\nClaude AI · Solidity / Anchor]
-    C --> D[Security Audit &\nPydantic Validation]
+    A([Input: CLI / MCP]) --> B[LangGraph Router]
+    B --> C[Smart Contract Generator]
+    C --> D[Security Audit & Pydantic Validation]
     D --> E{Passes?}
-    E -- No --> F[Self-Correction Loop\nAuto-fix & retry]
+    E -- No --> F[Self-Correction Loop]
     F --> C
     E -- Yes --> G[Multi-Chain Deployment]
-    G --> H1([Ethereum / Base /\nArbitrum / Optimism /\nPolygon])
+    G --> H1([EVM: Ethereum / Base / Arbitrum / Optimism / Polygon])
     G --> H2([Solana Devnet])
-
-    style A fill:#7C3AED,color:#fff
-    style B fill:#1e1e2e,color:#00ffff,stroke:#00ffff
-    style C fill:#1e1e2e,color:#fff
-    style D fill:#1e1e2e,color:#fff
-    style E fill:#1e1e2e,color:#ffcc00,stroke:#ffcc00
-    style F fill:#7C3AED,color:#fff
-    style G fill:#1e1e2e,color:#fff
-    style H1 fill:#627EEA,color:#fff
-    style H2 fill:#9945FF,color:#fff
 ```
 
 ---
