@@ -1,0 +1,1 @@
+* [Cross-Chain-Hub](https://github.com/Harmain11/Cross-Chain-Hub) - AI-driven agentic system for smart contract generation, security auditing, and code self-correction across multi-chain ecosystems (EVM + Solana).

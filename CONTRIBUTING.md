@@ -1,131 +1,185 @@
 # Contributing to AURA Forge
 
-Thank you for contributing! This guide covers the development workflow and — critically — the release process for the CLI and MCP packages.
+Thank you for your interest in contributing to **AURA Forge**! This document covers everything you need to get a local environment running, write good tests, and submit a pull request that gets merged quickly.
 
 ---
 
-## Development setup
+## Table of Contents
+
+- [Code of Conduct](#code-of-conduct)
+- [Local Setup](#local-setup)
+- [Project Structure](#project-structure)
+- [Development Workflow](#development-workflow)
+- [Testing](#testing)
+- [Submitting a Pull Request](#submitting-a-pull-request)
+- [Good First Issues](#good-first-issues)
+
+---
+
+## Code of Conduct
+
+Be respectful, constructive, and inclusive. We follow the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+
+---
+
+## Local Setup
+
+### Prerequisites
+
+| Tool | Version |
+|---|---|
+| Node.js | 18+ |
+| pnpm | 8+ |
+| Python | 3.10+ |
+| Git | any recent |
+
+### 1 — Clone and install
 
 ```bash
-# Prerequisites: Node.js ≥ 20, pnpm ≥ 9
+git clone https://github.com/Harmain11/Cross-Chain-Hub.git
+cd Cross-Chain-Hub
+
+# Install all JS/TS workspace packages
 pnpm install
+
+# Install Python dependencies (if contributing to agentic layer)
+pip install -r requirements.txt
 ```
 
-See [README.md](README.md) for full environment setup (database, env vars, etc.).
+### 2 — Environment variables
 
----
+Copy the example env file and fill in your keys:
 
-## Repository layout
-
-```
-packages/
-  cli/   — @aura-forge/cli   (terminal interface)
-  mcp/   — @aura-forge/mcp   (MCP server for Claude Desktop / Claude Code)
-
-artifacts/
-  api-server/          — Express 5 REST API
-  aura-forge/          — React + Vite SPA
-  aura-forge-landing/  — Marketing landing page
-  aura-forge-pitch/    — Pitch deck
-
-lib/
-  api-spec/            — OpenAPI source of truth + Orval codegen config
-  api-client-react/    — Auto-generated React Query hooks
-  api-zod/             — Auto-generated Zod schemas
-  db/                  — Drizzle ORM schema
+```bash
+cp .env.example .env
 ```
 
----
-
-## Common commands
-
-| Command | Description |
+| Variable | Purpose |
 |---|---|
-| `pnpm run typecheck` | Full TypeScript typecheck across all packages |
-| `pnpm run build` | Typecheck + build all packages |
-| `pnpm --filter @workspace/api-spec run codegen` | Regenerate client hooks and Zod schemas from `openapi.yaml` |
-| `pnpm --filter @workspace/db run push` | Push DB schema changes (dev only) |
+| `ANTHROPIC_API_KEY` | Required — powers the AI generation and audit pipeline |
+| `SESSION_SECRET` | Express session signing key |
+| `DATABASE_URL` | PostgreSQL connection string |
+
+### 3 — Start the development servers
+
+```bash
+# Start all artifact services at once
+pnpm dev
+
+# Or start individually
+pnpm --filter @workspace/api-server run dev     # API on :3001
+pnpm --filter @workspace/aura-forge run dev     # Web app
+pnpm --filter @workspace/aura-forge-landing run dev  # Landing page
+```
 
 ---
 
-## Release process — CLI & MCP
+## Project Structure
 
-`@aura-forge/cli` and `@aura-forge/mcp` are always released **together at the same version**. This prevents mismatched builds where a developer has, say, CLI `0.2.0` talking to MCP `0.1.0`.
-
-### 1. Update the changelogs
-
-Before bumping the version, document what changed in both changelogs:
-
-- `packages/cli/CHANGELOG.md`
-- `packages/mcp/CHANGELOG.md`
-
-Add a new `## [<new-version>] — <YYYY-MM-DD>` section at the top (below the header) with `### Added`, `### Changed`, `### Fixed`, and/or `### Removed` sub-sections as appropriate. Leave out sections that have no entries.
-
-### 2. Bump versions (both packages at once)
-
-```bash
-pnpm version:bump <new-version>
-# Example:
-pnpm version:bump 0.2.0
 ```
-
-This script (`version-bump.mjs` at the repo root) updates `packages/cli/package.json` and `packages/mcp/package.json` to the same version atomically. It will reject downgrades and invalid semver strings.
-
-**Never** edit the `version` field in either package's `package.json` by hand — always go through `pnpm version:bump` so both stay in sync.
-
-### 3. Review, commit, and tag
-
-```bash
-git diff packages/*/package.json        # sanity check
-git commit -am "chore: release v0.2.0"
-git tag v0.2.0
-git push && git push --tags
+Cross-Chain-Hub/
+├── packages/
+│   ├── cli/          # @aura-forge/cli — terminal REPL
+│   └── mcp/          # @aura-forge/mcp — MCP server (4 tools)
+├── artifacts/
+│   ├── api-server/   # Express + Drizzle ORM backend
+│   ├── aura-forge/   # React web app (Vite + React Query)
+│   ├── aura-forge-landing/  # Marketing site
+│   └── aura-forge-pitch/    # Pitch deck slides
+├── CONTRIBUTING.md
+├── ISSUES_TO_CREATE.md
+└── README.md
 ```
-
-### 4. Build
-
-```bash
-pnpm --filter @aura-forge/cli run build
-pnpm --filter @aura-forge/mcp run build
-```
-
-### 5. Publish to npm
-
-```bash
-pnpm --filter @aura-forge/cli publish
-pnpm --filter @aura-forge/mcp publish
-```
-
-Both packages use `"access": "public"` in their `publishConfig`, so no extra flags are needed.
-
-### Versioning policy
-
-Follow [Semantic Versioning](https://semver.org/):
-
-| Change type | Version bump |
-|---|---|
-| Bug fix, internal improvement | Patch (`0.1.x`) |
-| New feature, backward-compatible | Minor (`0.x.0`) |
-| Breaking CLI flag / MCP tool interface change | Major (`x.0.0`) |
 
 ---
 
-## Modifying the API
+## Development Workflow
 
-All REST endpoints are contract-first. Edit `lib/api-spec/openapi.yaml`, then regenerate:
-
-```bash
-pnpm --filter @workspace/api-spec run codegen
-```
-
-This regenerates the React Query hooks (`lib/api-client-react/`) and Zod validation schemas (`lib/api-zod/`) automatically.
+1. **Fork** the repository and clone your fork.
+2. Create a **feature branch** off `main`:
+   ```bash
+   git checkout -b feat/your-feature-name
+   ```
+3. Make your changes, following existing code style (TypeScript strict mode, ESLint, Prettier).
+4. **Commit** with a descriptive message using [Conventional Commits](https://www.conventionalcommits.org/):
+   ```
+   feat(cli): add --timeout flag to /deploy command
+   fix(audit): handle empty contract body without crashing
+   docs: update quickstart for Python 3.12
+   ```
+5. **Push** your branch and open a PR against `main`.
 
 ---
 
-## Pull request checklist
+## Testing
 
-- [ ] `pnpm run typecheck` passes
-- [ ] If REST endpoints changed, `pnpm --filter @workspace/api-spec run codegen` was run and the generated files are committed
-- [ ] If releasing, both `packages/cli/CHANGELOG.md` and `packages/mcp/CHANGELOG.md` have a new version section
-- [ ] If releasing, `pnpm version:bump <version>` was used (not manual edits to `package.json`)
-- [ ] Branch is up to date with `main`
+### CLI & MCP packages
+
+```bash
+# Run unit tests
+pnpm --filter @aura-forge/cli test
+pnpm --filter @aura-forge/mcp test
+
+# Run with coverage
+pnpm --filter @aura-forge/cli test -- --coverage
+```
+
+### API server
+
+```bash
+pnpm --filter @workspace/api-server test
+```
+
+### Integration tests (requires a running API)
+
+```bash
+# Make sure the API server is running first
+pnpm --filter @workspace/api-server run dev
+
+# Then run integration suite
+pnpm --filter @aura-forge/cli test:integration
+```
+
+### What to test
+
+- All new CLI commands must have unit tests covering the happy path, network error, and invalid-input cases.
+- New Pydantic validation rules must include at least one passing and one failing fixture.
+- New chain integrations must include a mock RPC test confirming the fallback list is exercised.
+
+---
+
+## Submitting a Pull Request
+
+### Checklist
+
+- [ ] Branch is based on the latest `main`
+- [ ] All existing tests pass (`pnpm test` in the root)
+- [ ] New functionality has tests
+- [ ] TypeScript compiles without errors (`pnpm typecheck`)
+- [ ] No new ESLint warnings (`pnpm lint`)
+- [ ] PR description explains **what** changed and **why**
+- [ ] If it changes user-facing CLI behaviour, the `CHANGELOG.md` in the affected package is updated
+
+### PR Title Format
+
+Follow Conventional Commits in the PR title — it is used to auto-generate changelogs:
+
+```
+feat(cli): add dynamic network routing module
+fix(audit): correct Pydantic score boundary condition
+chore(deps): bump solc to 0.8.27
+```
+
+### Review process
+
+- A maintainer will review within **3 business days**.
+- We may request changes — please address feedback within 7 days or the PR may be closed to keep the queue clean.
+- Once approved, a maintainer will squash-merge your PR.
+
+---
+
+## Good First Issues
+
+New to the codebase? Check out issues labelled [`good first issue`](https://github.com/Harmain11/Cross-Chain-Hub/issues?q=label%3A%22good+first+issue%22) — they are scoped, well-documented, and have a suggested approach in the issue body.
+
+See [ISSUES_TO_CREATE.md](ISSUES_TO_CREATE.md) for a list of open community tasks.
