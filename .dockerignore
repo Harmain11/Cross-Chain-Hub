@@ -1,0 +1,17 @@
+# Monorepo workspace dirs not needed for the MCP image
+artifacts/
+lib/
+scripts/
+node_modules/
+
+# MCP package — keep only what the Dockerfile explicitly COPYs
+packages/mcp/node_modules/
+packages/mcp/dist/
+
+# Misc
+.env*
+*.log
+.git/
+.replit
+replit.nix
+attached_assets/

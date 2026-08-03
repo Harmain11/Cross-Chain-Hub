@@ -94,6 +94,32 @@ Cross-Chain-Hub/
 
 ---
 
+## Docker / Glama
+
+The repo ships a `Dockerfile` that builds and runs the MCP server. Glama uses this to automatically introspect the available tools.
+
+```bash
+# Build the image
+docker build -t aura-forge-mcp .
+
+# Run (Glama pipes JSON-RPC over stdin/stdout — no ports required)
+docker run --rm -i \
+  -e AURA_FORGE_API_KEY=af_your_key \
+  aura-forge-mcp
+```
+
+### Glama entry
+
+To submit to [Glama](https://glama.ai), point it at:
+
+```
+https://github.com/Harmain11/Cross-Chain-Hub
+```
+
+Glama will build the `Dockerfile` at the repo root, start the container, and pipe `initialize` + `tools/list` over stdio. The four exposed tools (`generate_contract`, `audit_contract`, `list_contracts`, `get_contract`) will be discovered automatically.
+
+---
+
 ## Contributing
 
 We welcome contributions of all kinds — bug fixes, new chain integrations, validation rules, and CLI flags. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
