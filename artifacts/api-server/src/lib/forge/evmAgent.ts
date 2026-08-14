@@ -58,11 +58,33 @@ export interface EvmPlan {
   approach: string;
 }
 
-interface AgentNote {
+export interface AgentNote {
   step: number;
   action: string;
   detail: string;
   outcome: string;
+}
+
+/**
+ * Context passed to `runEvmAgent` when performing a harden-only re-run.
+ * The agent pre-seeds its state with the parent project's code, score, notes,
+ * and prior scratchpad so it knows what was already tried.
+ */
+export interface HardenContext {
+  /** Existing contract source to start hardening from */
+  code: string;
+  /** Security score from the parent project's last audit */
+  securityScore: number;
+  /** Audit notes from the parent project's last audit */
+  securityNotes: string;
+  /** Prior agent scratchpad steps from the parent project (may be empty) */
+  agentNotes: AgentNote[];
+  /**
+   * Whether the parent contract uses the UUPS upgradeable pattern.
+   * Must be copied from the parent, not the child, so audit_security and the
+   * system prompt apply the correct upgradeability requirements.
+   */
+  upgradeable: boolean;
 }
 
 interface AgentState {
@@ -257,19 +279,32 @@ function applyFunctionPatch(code: string, functionName: string, newImpl: string)
   ].join("\n");
 }
 
-function buildSystemPrompt(project: ContractProjectRow, plan: EvmPlan): string {
+function buildSystemPrompt(project: ContractProjectRow, plan: EvmPlan, isHardenPass = false): string {
   return (
     "You are AURA — an autonomous smart-contract engineer. " +
-    "Your goal is to produce a production-quality, secure Solidity contract that scores 95/100 or above in a security audit. " +
+    (isHardenPass
+      ? "Your goal is to surgically improve the security of an existing Solidity contract to reach a score of 95/100 or above. " +
+        "The contract code is already loaded — do NOT rewrite from scratch unless absolutely necessary. " +
+        "Prefer patch_function for targeted fixes. "
+      : "Your goal is to produce a production-quality, secure Solidity contract that scores 95/100 or above in a security audit. ") +
     "You have a set of tools available. Use them in this preferred order: " +
-    "1. fetch_eip for any EIP in your plan, " +
-    "2. generate_tests (TDD — commit to behaviour before writing code), " +
-    "3. write_contract, " +
-    "4. compile (always after writing/patching), " +
-    "5. audit_security, " +
-    "6. patch_function for targeted fixes (preferred over full rewrites), " +
-    "7. run_slither after each successful compile, " +
-    "8. finish when score ≥ 95 or options exhausted.\n\n" +
+    (isHardenPass
+      ? "1. compile (verify the existing code still compiles), " +
+        "2. run_slither (static analysis), " +
+        "3. audit_security (understand what to fix), " +
+        "4. patch_function for targeted fixes (PREFERRED — surgical and safe), " +
+        "5. write_contract only if a full rewrite is truly necessary, " +
+        "6. compile after every patch or rewrite, " +
+        "7. audit_security again to confirm improvement, " +
+        "8. finish when score ≥ 95 or options exhausted.\n\n"
+      : "1. fetch_eip for any EIP in your plan, " +
+        "2. generate_tests (TDD — commit to behaviour before writing code), " +
+        "3. write_contract, " +
+        "4. compile (always after writing/patching), " +
+        "5. audit_security, " +
+        "6. patch_function for targeted fixes (preferred over full rewrites), " +
+        "7. run_slither after each successful compile, " +
+        "8. finish when score ≥ 95 or options exhausted.\n\n") +
     `CONTRACT NAME: ${project.contractName}\n` +
     `SPEC: ${project.prompt}\n` +
     `PLAN SUMMARY: ${plan.summary}\n` +
@@ -589,26 +624,42 @@ function addNote(state: AgentState, action: string, detail: string, outcome: str
 export async function runEvmAgent(
   project: ContractProjectRow,
   emit: (event: ForgeEvent) => void,
+  hardenContext?: HardenContext,
 ): Promise<void> {
   await setStatus(project.id, "generating");
 
   // ── 1. Planning phase ──────────────────────────────────────────────────────
-  emit({ phase: "generating", message: "Agent planning contract architecture..." });
+  let plan: EvmPlan;
 
-  const template = getTemplate("EVM", project.templateId ?? undefined);
-  const plan = await planEvmContract(
-    project.prompt,
-    project.contractName,
-    template?.promptFragment,
-    project.upgradeable ? UPGRADEABLE_EVM_FRAGMENT : undefined,
-  );
-
-  emit({
-    phase: "generating",
-    message:
-      `Plan: ${plan.summary} | Standards: ${plan.applicable_standards.join(", ") || "none"} | ` +
-      `Attack vectors: ${plan.attack_vectors.slice(0, 3).join(", ")}`,
-  });
+  if (hardenContext) {
+    // For harden-only runs, build a focused security-improvement plan without
+    // calling the LLM planner — we already know what the contract does.
+    emit({ phase: "auditing", message: "Agent preparing security-hardening pass..." });
+    plan = {
+      summary: `Harden the security of the existing ${project.contractName} contract`,
+      applicable_standards: [],
+      eips_to_check: [],
+      security_properties: ["No reentrancy", "Proper access control", "Integer safety", "Input validation"],
+      attack_vectors: ["Reentrancy", "Unauthorized access", "Integer overflow", "Flash loan attacks"],
+      test_requirements: ["Test patched functions", "Test access control", "Test edge cases"],
+      approach: "Surgically fix identified security issues using patch_function without rewriting the whole contract",
+    };
+  } else {
+    emit({ phase: "generating", message: "Agent planning contract architecture..." });
+    const template = getTemplate("EVM", project.templateId ?? undefined);
+    plan = await planEvmContract(
+      project.prompt,
+      project.contractName,
+      template?.promptFragment,
+      project.upgradeable ? UPGRADEABLE_EVM_FRAGMENT : undefined,
+    );
+    emit({
+      phase: "generating",
+      message:
+        `Plan: ${plan.summary} | Standards: ${plan.applicable_standards.join(", ") || "none"} | ` +
+        `Attack vectors: ${plan.attack_vectors.slice(0, 3).join(", ")}`,
+    });
+  }
 
   // Persist the plan
   await db
@@ -616,37 +667,80 @@ export async function runEvmAgent(
     .set({ agentPlan: JSON.stringify(plan) })
     .where(eq(contractProjectsTable.id, project.id));
 
-  // ── 2. Initialize agent state ──────────────────────────────────────────────
+  // ── 2. Effective project — preserve parent configuration for harden passes ──
+  // For harden-only runs the `project` row is the freshly-created child, which
+  // may not carry fields like `upgradeable` that were set on the parent.
+  // We create a merged view so audit_security, the system prompt, and any other
+  // code that reads `project.*` use the correct parent values.
+  const effectiveProject = hardenContext
+    ? { ...project, upgradeable: hardenContext.upgradeable }
+    : project;
+
+  // ── 3. Initialize agent state ──────────────────────────────────────────────
+  // When hardening, pre-seed state with the parent project's code and audit
+  // results so the agent can observe the current baseline immediately.
+  // The parent's prior scratchpad is prepended so the agent knows what has
+  // already been tried (offset step numbers to keep them contiguous).
+  const priorNotes: AgentNote[] = hardenContext
+    ? hardenContext.agentNotes.map((n, i) => ({ ...n, step: i + 1 }))
+    : [];
+
   const state: AgentState = {
-    code: null,
-    compiledResult: null,
+    code: hardenContext?.code ?? null,
+    compiledResult: null, // always start without a cached compile — agent will re-verify
     slitherFindings: "",
-    securityScore: 0,
-    securityNotes: "",
+    securityScore: hardenContext?.securityScore ?? 0,
+    securityNotes: hardenContext?.securityNotes ?? "",
     contextQuestion: null,
     gasNotes: "",
     tests: null,
-    scratchpad: [],
+    scratchpad: priorNotes,
     compileLog: [],
     finished: false,
     finishReason: "",
   };
 
-  // ── 3. Build initial conversation ──────────────────────────────────────────
-  const systemPrompt = buildSystemPrompt(project, plan);
+  // ── 4. Build initial conversation ──────────────────────────────────────────
+  const systemPrompt = buildSystemPrompt(effectiveProject, plan, !!hardenContext);
 
-  const initialUserMsg =
-    `Begin implementing the ${project.contractName} contract. ` +
-    (plan.eips_to_check.length > 0
-      ? `Start by fetching EIP(s) ${plan.eips_to_check.join(", ")} to verify you implement the standards correctly. `
-      : "") +
-    "Then generate tests (TDD), write the contract, compile, run Slither, audit, and iterate until score ≥ 95.";
+  let initialUserMsg: string;
+  if (hardenContext) {
+    const priorHistory =
+      hardenContext.agentNotes.length > 0
+        ? `\n\nPrevious agent history (${hardenContext.agentNotes.length} step(s) already completed by an earlier run):\n` +
+          hardenContext.agentNotes
+            .map((n) => `  Step ${n.step}: [${n.action}] ${n.detail} → ${n.outcome}`)
+            .join("\n")
+        : "";
+
+    // Include the full source so the model can read exact function signatures
+    // and bodies before deciding which functions to patch.
+    initialUserMsg =
+      `You are performing a security-hardening pass on the existing ${effectiveProject.contractName} contract. ` +
+      `The contract currently scores ${hardenContext.securityScore}/100. ` +
+      `Known issues from the last audit: ${hardenContext.securityNotes}` +
+      priorHistory +
+      `\n\nHere is the current contract source code:\n` +
+      "```solidity\n" + hardenContext.code + "\n```\n\n" +
+      `The contract code is loaded and ready. ` +
+      `Start by calling compile to confirm it still compiles, then run_slither and audit_security ` +
+      `to understand the current state. Use patch_function for targeted fixes — you have the full ` +
+      `source above so you can copy exact function signatures. ` +
+      `Goal: reach a security score of ${TARGET_SCORE} or above.`;
+  } else {
+    initialUserMsg =
+      `Begin implementing the ${effectiveProject.contractName} contract. ` +
+      (plan.eips_to_check.length > 0
+        ? `Start by fetching EIP(s) ${plan.eips_to_check.join(", ")} to verify you implement the standards correctly. `
+        : "") +
+      "Then generate tests (TDD), write the contract, compile, run Slither, audit, and iterate until score ≥ 95.";
+  }
 
   const messages: AnthropicMessageParam[] = [
     { role: "user", content: initialUserMsg },
   ];
 
-  // ── 4. ReAct agent loop ────────────────────────────────────────────────────
+  // ── 5. ReAct agent loop ────────────────────────────────────────────────────
   let stepCount = 0;
 
   while (!state.finished && stepCount < MAX_AGENT_STEPS) {
@@ -681,11 +775,13 @@ export async function runEvmAgent(
     for (const block of response.content) {
       if (block.type !== "tool_use") continue;
 
+      // Pass effectiveProject so audit_security and other tools use the
+      // correct upgradeable flag (from the parent, not the fresh child row).
       const result = await executeTool(
         block.name,
         block.input as Record<string, unknown>,
         state,
-        project,
+        effectiveProject,
         emit,
       );
 
@@ -711,11 +807,11 @@ export async function runEvmAgent(
     });
   }
 
-  // ── 5. Ensure we have compiled code to save ────────────────────────────────
+  // ── 6. Ensure we have compiled code to save ────────────────────────────────
   // If the agent never successfully compiled, try one final compile.
   if (state.code && !state.compiledResult?.success) {
     emit({ phase: "compiling", message: "Final compile pass..." });
-    state.compiledResult = compileSolidity(project.contractName, state.code);
+    state.compiledResult = compileSolidity(effectiveProject.contractName, state.code);
     if (state.compiledResult.success) {
       emit({ phase: "compiling", message: "Final compile succeeded." });
     }
@@ -735,25 +831,25 @@ export async function runEvmAgent(
     return;
   }
 
-  // ── 6. Generate tests if the agent didn't (fallback) ──────────────────────
+  // ── 7. Generate tests if the agent didn't (fallback) ──────────────────────
   if (!state.tests) {
     emit({ phase: "testing", message: "Generating test suite..." });
     try {
       const { generateTestSuite } = await import("./llm");
-      state.tests = await generateTestSuite(state.code, project.contractName, "EVM");
+      state.tests = await generateTestSuite(state.code, effectiveProject.contractName, "EVM");
       emit({ phase: "testing", message: "Test suite generated." });
     } catch {
       emit({ phase: "testing", message: "Test suite generation skipped." });
     }
   }
 
-  // ── 7. Foundry + Halmos (non-blocking, fire-and-forget) ───────────────────
+  // ── 8. Foundry + Halmos (non-blocking, fire-and-forget) ───────────────────
   if (state.tests) {
-    runFoundryTests(state.code, state.tests, project.contractName)
+    runFoundryTests(state.code, state.tests, effectiveProject.contractName)
       .then((fr) => emit({ phase: "testing", message: fr.formattedSummary }))
       .catch(() => {});
 
-    runHalmosVerification(state.code, state.tests, project.contractName)
+    runHalmosVerification(state.code, state.tests, effectiveProject.contractName)
       .then((fv) => { if (fv.available) emit({ phase: "verification", message: fv.summary }); })
       .catch(() => {});
   }

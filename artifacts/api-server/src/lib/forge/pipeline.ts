@@ -3,21 +3,17 @@ import { db, contractProjectsTable, type ContractProjectRow } from "@workspace/d
 import { compileSolidity, type EvmCompileResult } from "./evmCompile";
 import { compileAnchorProgram, withTempBuildDir, type AnchorCompileResult } from "./solanaCompile";
 import {
-  generateSolidityContract,
   repairSolidityContract,
   generateAnchorContract,
   repairAnchorContract,
   scoreContractSecurity,
-  hardenSolidityContract,
   hardenAnchorContract,
   generateTestSuite,
 } from "./llm";
-import { getTemplate, UPGRADEABLE_EVM_FRAGMENT } from "./templates";
-import { runSlither } from "./slitherAnalysis";
+import { getTemplate } from "./templates";
 import { runAnchorChecks } from "./anchorChecks";
-import { runFoundryTests } from "./foundryRunner";
-import { runHalmosVerification, runKaniVerification } from "./formalVerification";
-import { runEvmAgent } from "./evmAgent";
+import { runKaniVerification } from "./formalVerification";
+import { runEvmAgent, type AgentNote } from "./evmAgent";
 
 /**
  * Generates a matching test suite for the final contract version. Test-generation
@@ -59,8 +55,6 @@ export type ForgeEvent =
   | { phase: "error"; message: string };
 
 const MAX_HEAL_ATTEMPTS = 3;
-const MAX_SECURITY_HARDENING_ATTEMPTS = 5;
-const TARGET_SECURITY_SCORE = 95;
 
 // Solana-specific limits: cargo-build-sbf is 4–7 min per compile, so we
 // lower the iteration count and accept a slightly less aggressive target to
@@ -241,6 +235,13 @@ export async function runHardenOnlyPipeline(
   }
 }
 
+/**
+ * EVM "Improve Security" re-run now goes through the full ReAct agent loop,
+ * exactly like a fresh forge run, but with the parent project's existing code,
+ * score, and notes pre-seeded into the agent's state and the parent's prior
+ * agentNotes prepended to the scratchpad so the agent knows what has already
+ * been tried.
+ */
 async function hardenEvmOnly(
   child: ContractProjectRow,
   parent: ContractProjectRow,
@@ -248,176 +249,26 @@ async function hardenEvmOnly(
 ) {
   emit({
     phase: "auditing",
-    message: `Starting a new security-hardening pass on top of "${parent.contractName}"...`,
+    message: `Starting agent-driven security-hardening pass on top of "${parent.contractName}"...`,
   });
 
-  const seed = await compileWithSelfHeal(
-    parent.smartContractCode!,
-    parent.contractName,
-    emit,
-    child.id,
-  );
-  const compileLog: string[] = [...seed.log];
-
-  if (!seed.result.success) {
-    await db
-      .update(contractProjectsTable)
-      .set({ status: "failed", smartContractCode: seed.code, compileLog: compileLog.join("\n\n") })
-      .where(eq(contractProjectsTable.id, child.id));
-    emit({ phase: "error", message: "Source contract failed to recompile; cannot harden." });
-    return;
-  }
-
-  let bestCode = seed.code;
-  let bestResult = seed.result;
-  let bestScore = parent.securityScore ?? 0;
-  let bestNotes = parent.securityNotes ?? "";
-  let bestContextQuestion: string | null = null;
-  let bestGasNotes = parent.gasNotes ?? "";
-
-  // ── Slither static analysis on seed code ────────────────────────────────
-  emit({ phase: "auditing", message: "Running Slither static analysis..." });
-  let slitherResult = await runSlither(bestCode, parent.contractName);
-  if (slitherResult.available) {
-    const hi = slitherResult.findings.filter((f) => f.impact === "High").length;
-    const md = slitherResult.findings.filter((f) => f.impact === "Medium").length;
-    emit({
-      phase: "auditing",
-      message: slitherResult.findings.length > 0
-        ? `Slither: ${slitherResult.findings.length} finding(s) — ${hi} high, ${md} medium.`
-        : "Slither: no high/medium findings detected.",
-    });
-  } else {
-    emit({ phase: "auditing", message: "Slither not installed — LLM-only audit. (pip install slither-analyzer to enable)" });
-  }
-
-  if (parent.securityScore === null) {
-    emit({ phase: "auditing", message: "Running LLM security audit..." });
-    const scored = await scoreContractSecurity(bestCode, "EVM", parent.upgradeable, bestResult.gasEstimates);
-    bestScore = scored.score;
-    bestNotes = scored.notes;
-    bestContextQuestion = scored.contextQuestion;
-    bestGasNotes = scored.gasNotes;
-  }
-
-  let hardenAttempt = 0;
-  while (
-    hardenAttempt < MAX_SECURITY_HARDENING_ATTEMPTS &&
-    (hardenAttempt === 0 || bestScore < TARGET_SECURITY_SCORE)
-  ) {
-    hardenAttempt += 1;
-    await setStatus(child.id, "hardening");
-    emit({
-      phase: "hardening",
-      message: `Hardening contract (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS}), current score ${bestScore}/100...`,
-    });
-
-    const combinedNotes = combineNotes(bestNotes, slitherResult.formattedForLlm);
-    const hardenedCode = await hardenSolidityContract(
-      bestCode,
-      combinedNotes,
-      bestScore,
-      parent.contractName,
-      child.userContext ?? undefined,
-    );
-    const recompiled = await compileWithSelfHeal(hardenedCode, parent.contractName, emit, child.id);
-    compileLog.push(...recompiled.log);
-
-    if (!recompiled.result.success) {
-      emit({
-        phase: "hardening",
-        message: "Hardened contract failed to compile even after self-healing; keeping previous best version.",
-      });
-      continue;
-    }
-
-    // Re-run Slither to track which findings were resolved.
-    slitherResult = await runSlither(recompiled.code, parent.contractName);
-    if (slitherResult.available && slitherResult.findings.length > 0) {
-      emit({
-        phase: "auditing",
-        message: `Slither re-scan: ${slitherResult.findings.length} finding(s) still present after hardening.`,
-      });
-    }
-
-    emit({ phase: "auditing", message: "Re-auditing hardened contract..." });
-    const rescored = await scoreContractSecurity(
-      recompiled.code,
-      "EVM",
-      parent.upgradeable,
-      recompiled.result.gasEstimates,
-    );
-    emit({ phase: "auditing", message: `Security score: ${rescored.score}/100. ${rescored.notes}` });
-
-    if (rescored.score >= bestScore) {
-      bestCode = recompiled.code;
-      bestResult = recompiled.result;
-      bestScore = rescored.score;
-      bestNotes = rescored.notes;
-      bestContextQuestion = rescored.contextQuestion;
-      bestGasNotes = rescored.gasNotes;
-    } else {
-      emit({
-        phase: "hardening",
-        message: `Hardening attempt regressed the score (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
-      });
+  // Load the parent's prior scratchpad so the agent knows what was already tried.
+  let parentAgentNotes: AgentNote[] = [];
+  if (parent.agentNotes) {
+    try {
+      parentAgentNotes = JSON.parse(parent.agentNotes) as AgentNote[];
+    } catch {
+      // Malformed JSON — proceed with an empty prior history.
     }
   }
 
-  if (bestScore >= TARGET_SECURITY_SCORE) {
-    bestContextQuestion = null;
-  }
-
-  emit({
-    phase: "auditing",
-    message:
-      bestScore >= TARGET_SECURITY_SCORE
-        ? `Reached target security score: ${bestScore}/100.`
-        : `Stopped after ${hardenAttempt} hardening attempt(s). Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
+  await runEvmAgent(child, emit, {
+    code: parent.smartContractCode!,
+    securityScore: parent.securityScore ?? 0,
+    securityNotes: parent.securityNotes ?? "",
+    agentNotes: parentAgentNotes,
+    upgradeable: parent.upgradeable ?? false,
   });
-
-  if (bestScore < TARGET_SECURITY_SCORE && bestContextQuestion) {
-    emit({
-      phase: "auditing",
-      message: `Providing more detail would improve this recommendation: ${bestContextQuestion}`,
-    });
-  }
-
-  const testSuiteCode = await generateTestSuiteSafe(bestCode, parent.contractName, "EVM", undefined, emit);
-
-  // ── Foundry test execution (non-blocking) ──────────────────────────────
-  if (testSuiteCode) {
-    runFoundryTests(bestCode, testSuiteCode, parent.contractName)
-      .then((fr) => emit({ phase: "testing", message: fr.formattedSummary }))
-      .catch(() => {});
-  }
-
-  // ── Halmos formal verification (non-blocking, fire-and-forget) ──────────
-  if (testSuiteCode) {
-    runHalmosVerification(bestCode, testSuiteCode, parent.contractName)
-      .then((fv) => { if (fv.available) emit({ phase: "verification", message: fv.summary }); })
-      .catch(() => {});
-  }
-
-  const [updated] = await db
-    .update(contractProjectsTable)
-    .set({
-      status: "success",
-      smartContractCode: bestCode,
-      compiledBytecode: bestResult.bytecode,
-      abiOrIdl: JSON.stringify(bestResult.abi),
-      securityScore: bestScore,
-      securityNotes: bestNotes,
-      securityContextQuestion: bestContextQuestion,
-      compileLog: compileLog.join("\n\n"),
-      testSuiteCode,
-      gasEstimates: bestResult.gasEstimates ? JSON.stringify(bestResult.gasEstimates) : null,
-      gasNotes: bestGasNotes || null,
-    })
-    .where(eq(contractProjectsTable.id, child.id))
-    .returning();
-
-  emit({ phase: "done", project: updated! });
 }
 
 /**
