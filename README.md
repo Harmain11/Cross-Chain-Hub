@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="https://cross-chain-hub.replit.app/aura-forge-landing/" width="100%" alt="AURA Forge" />
-
 # ⚡ AURA Forge
 
 ### The AI-Powered Smart Contract Factory
