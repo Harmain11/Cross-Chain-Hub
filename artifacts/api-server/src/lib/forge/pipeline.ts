@@ -14,6 +14,7 @@ import { getTemplate } from "./templates";
 import { runAnchorChecks } from "./anchorChecks";
 import { runKaniVerification } from "./formalVerification";
 import { runEvmAgent, type AgentNote } from "./evmAgent";
+import { runSolanaHardenAgent } from "./solanaAgent";
 
 /**
  * Generates a matching test suite for the final contract version. Test-generation
@@ -273,12 +274,12 @@ async function hardenEvmOnly(
 }
 
 /**
- * Optimised Solana "Improve Security" re-run.
+ * Solana "Improve Security" re-run — now agent-driven.
  *
- * Same strategy as runSolanaPipeline: run the hardening loop with LLM-only
- * calls (no cargo recompile per iteration), then do one final compile of the
- * best-scoring code.  This keeps the total time under ~10 minutes instead of
- * the ~35 minutes a 5-pass loop with full recompiles would take.
+ * Delegates to runSolanaHardenAgent (solanaAgent.ts) which runs a ReAct-style
+ * LLM loop (audit → patch_function → audit → … → finish).  Cargo toolchain
+ * constraints are respected by keeping all iterations LLM-only; exactly one
+ * final cargo compile is done here after the agent exits.
  */
 async function hardenSolanaOnly(
   child: ContractProjectRow,
@@ -287,129 +288,128 @@ async function hardenSolanaOnly(
 ) {
   emit({
     phase: "auditing",
-    message: `Starting a new security-hardening pass on top of "${parent.contractName}"...`,
+    message: `Starting agent-driven security-hardening pass on top of "${parent.contractName}"...`,
   });
 
-  let bestCode = parent.smartContractCode!;
-  let bestIdl = parent.abiOrIdl ?? "";
-  let bestScore = parent.securityScore ?? 0;
-  let bestNotes = parent.securityNotes ?? "";
-  let bestContextQuestion: string | null = null;
-  let bestGasNotes = parent.gasNotes ?? "";
   // Keep the parent's compiled binary as the fallback until a better one is produced.
   let bestSo: string | null = parent.compiledBytecode ?? null;
 
-  if (parent.securityScore === null) {
-    emit({ phase: "auditing", message: "Running LLM security audit..." });
-    const scored = await scoreContractSecurity(bestCode, "SOLANA");
-    bestScore = scored.score;
-    bestNotes = scored.notes;
-    bestContextQuestion = scored.contextQuestion;
-    bestGasNotes = scored.gasNotes;
-  }
-
-  const compileLog: string[] = [];
-
   // ── cargo clippy (Anchor built-in checks) — run in a temp build dir ──────
-  let anchorFindings = "";
+  let clippyFindings = "";
   await withTempBuildDir(async (clippyDir) => {
     emit({ phase: "auditing", message: "Running cargo clippy (Anchor built-in checks)..." });
     const clippy = await runAnchorChecks(clippyDir);
     if (clippy.available) {
-      anchorFindings = clippy.formattedForLlm;
+      clippyFindings = clippy.formattedForLlm;
       emit({
         phase: "auditing",
         message: clippy.clippyPassed
           ? "cargo clippy: no warnings."
-          : "cargo clippy: warnings detected — feeding into self-correction loop.",
+          : "cargo clippy: warnings detected — feeding into agent.",
       });
     } else {
       emit({ phase: "auditing", message: "cargo clippy unavailable — skipping Anchor built-in checks." });
     }
   }).catch(() => {});
 
-  // ── LLM-only hardening loop ──────────────────────────────────────────────
-  let hardenAttempt = 0;
-  while (
-    hardenAttempt < MAX_SOLANA_HARDENING_ATTEMPTS &&
-    (hardenAttempt === 0 || bestScore < TARGET_SOLANA_SECURITY_SCORE)
-  ) {
-    hardenAttempt += 1;
-    await setStatus(child.id, "hardening");
-    emit({
-      phase: "hardening",
-      message: `Hardening program (attempt ${hardenAttempt}/${MAX_SOLANA_HARDENING_ATTEMPTS}, LLM only), current score ${bestScore}/100...`,
-    });
+  // ── Agent loop (LLM-only: audit → patch → audit → finish) ───────────────
+  const agentResult = await runSolanaHardenAgent(child, parent, clippyFindings, emit);
 
-    // Merge clippy findings with LLM audit notes for combined self-correction.
-    const combinedNotes = combineNotes(bestNotes, anchorFindings);
-    let hardened: { code: string; idl: string };
-    try {
-      hardened = await hardenAnchorContract(
-        bestCode, bestIdl, combinedNotes, bestScore, parent.contractName,
-        child.userContext ?? undefined,
-      );
-    } catch (err) {
-      emit({
-        phase: "hardening",
-        message: `Hardening pass failed (${err instanceof Error ? err.message : "unknown error"}); keeping previous best version.`,
-      });
-      continue;
-    }
+  // ── One final cargo compile of the agent's best-scoring code ────────────
+  //
+  // Source/binary/IDL consistency guarantee — the three cases:
+  //   1. Compile succeeds  → use the compiled result (code/IDL/so all come from one build).
+  //   2. Compile fails     → revert to the parent's full artifact set (code/IDL/so/score all
+  //                          from the parent) so the database always stores a matching triple.
+  //   3. Toolchain unavailable → same as case 2: revert to parent's full artifact set.
+  //                              Toolchain unavailability is an expected supported scenario,
+  //                              not an exception; mixing generations is never acceptable.
+  //   In cases 2 and 3 the agent's work is preserved in agentNotes for future re-runs.
 
-    emit({ phase: "auditing", message: "Re-auditing hardened program..." });
-    const rescored = await scoreContractSecurity(hardened.code, "SOLANA");
-    emit({ phase: "auditing", message: `Security score: ${rescored.score}/100. ${rescored.notes}` });
+  // Start by assuming we will fall back to the parent's artifact set.
+  // Only case 1 (successful compile) will update these variables.
+  let persistCode = parent.smartContractCode!;
+  let persistIdl = parent.abiOrIdl ?? "";
+  let persistSo = parent.compiledBytecode ?? null;
+  let persistScore = parent.securityScore ?? 0;
+  let persistNotes = parent.securityNotes ?? "";
+  let persistContextQuestion: string | null = null;
+  let persistGasNotes = parent.gasNotes ?? "";
 
-    if (rescored.score >= bestScore) {
-      bestCode = hardened.code;
-      bestIdl = hardened.idl;
-      bestScore = rescored.score;
-      bestNotes = rescored.notes;
-      bestContextQuestion = rescored.contextQuestion;
-      bestGasNotes = rescored.gasNotes;
-    } else {
-      emit({
-        phase: "hardening",
-        message: `Score regressed (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
-      });
-    }
-  }
+  const compileLog: string[] = [];
+  let compileLogHeader = "Anchor/cargo toolchain unavailable; hardening proceeded without a real rebuild. Parent artifact preserved.";
 
-  if (bestScore >= TARGET_SOLANA_SECURITY_SCORE) {
-    bestContextQuestion = null;
-  }
-
-  emit({
-    phase: "auditing",
-    message:
-      bestScore >= TARGET_SOLANA_SECURITY_SCORE
-        ? `Reached target security score: ${bestScore}/100.`
-        : `Stopped after ${hardenAttempt} hardening attempt(s). Best achieved: ${bestScore}/100 (target ${TARGET_SOLANA_SECURITY_SCORE}).`,
-  });
-
-  if (bestScore < TARGET_SOLANA_SECURITY_SCORE && bestContextQuestion) {
-    emit({ phase: "auditing", message: `Providing more detail would improve this recommendation: ${bestContextQuestion}` });
-  }
-
-  // ── One final cargo compile of the best-scoring code (with IDL) ─────────
-  let toolchainUnavailable = false;
   await withTempBuildDir(async (buildDir) => {
     emit({ phase: "compiling", message: "Final compile of best-scoring code (with IDL build)..." });
     const final = await compileAnchorWithSelfHeal(
-      bestCode, parent.contractName, buildDir, emit, child.id, { skipIdl: false },
+      agentResult.code, parent.contractName, buildDir, emit, child.id, { skipIdl: false },
     );
     compileLog.push(...final.log);
+
     if (final.result.toolchainUnavailable) {
-      toolchainUnavailable = true;
-      emit({ phase: "compiling", message: "Anchor/cargo toolchain unavailable; keeping parent's compiled binary." });
+      emit({
+        phase: "compiling",
+        message:
+          "Anchor/cargo toolchain unavailable — reverting to parent's compiled artifact to keep source, IDL, and binary consistent. " +
+          "Agent improvements are recorded in the history for future re-runs.",
+      });
+      // persistCode/IDL/So/Score etc. remain at parent values (set above).
+      compileLogHeader = "Anchor/cargo toolchain unavailable; parent artifact preserved for source/binary consistency.";
     } else if (final.result.success) {
-      bestCode = final.code;
-      bestIdl = final.result.idl ?? bestIdl;
-      bestSo = final.result.soBase64 ?? bestSo;
-      emit({ phase: "compiling", message: `Final compile succeeded: ${final.result.soSizeBytes} bytes${final.result.idl ? ", real IDL produced" : ""}.` });
+      // Require a real IDL from this build.  `anchor idl build` is non-fatal
+      // inside compileAnchorWithSelfHeal, so a successful .so may still carry
+      // a null IDL.  If the IDL is missing we cannot guarantee the interface
+      // descriptor matches the new binary, so we revert to the full parent set.
+      if (!final.result.idl) {
+        emit({
+          phase: "compiling",
+          message:
+            "Compile succeeded but IDL generation failed — reverting to parent's compiled artifact " +
+            "to keep source, IDL, and binary consistent.",
+        });
+        compileLogHeader = "IDL generation failed after successful compile; parent artifact preserved for source/IDL/binary consistency.";
+        // persistCode/IDL/So/Score etc. remain at parent values.
+      } else {
+        emit({ phase: "compiling", message: `Final compile succeeded: ${final.result.soSizeBytes} bytes, real IDL produced.` });
+
+        // If self-healing changed the source, the agent's audit score no longer
+        // describes the saved code.  Re-audit the healed code so the persisted
+        // score always corresponds to the exact source being stored.
+        let compiledScore = agentResult.securityScore;
+        let compiledNotes = agentResult.securityNotes;
+        let compiledContextQuestion = agentResult.contextQuestion;
+        let compiledGasNotes = agentResult.gasNotes;
+
+        if (final.code !== agentResult.code) {
+          emit({ phase: "auditing", message: "Self-heal changed the source — re-auditing compiled code to align score with saved artifact..." });
+          const reaudited = await scoreContractSecurity(final.code, "SOLANA");
+          compiledScore = reaudited.score;
+          compiledNotes = reaudited.notes;
+          compiledContextQuestion = reaudited.score >= TARGET_SOLANA_SECURITY_SCORE ? null : reaudited.contextQuestion;
+          compiledGasNotes = reaudited.gasNotes;
+          emit({ phase: "auditing", message: `Re-audit after self-heal: ${reaudited.score}/100.` });
+        }
+
+        // All three artifacts come from this single build — source/IDL/binary are consistent.
+        persistCode = final.code;
+        persistIdl = final.result.idl;
+        persistSo = final.result.soBase64 ?? null;
+        persistScore = compiledScore;
+        persistNotes = compiledNotes;
+        persistContextQuestion = compiledContextQuestion;
+        persistGasNotes = compiledGasNotes;
+        compileLogHeader = "";
+      }
     } else {
-      emit({ phase: "compiling", message: "Final compile failed; keeping parent's compiled binary and best LLM IDL." });
+      // Compile failed — revert to parent's full artifact so source/IDL/binary match.
+      emit({
+        phase: "compiling",
+        message:
+          "Final compile failed — reverting to parent's compiled artifact to keep source, IDL, and binary consistent. " +
+          "Agent improvements are recorded in the history for future re-runs.",
+      });
+      compileLogHeader = "Final compile of agent-improved source failed; parent artifact preserved for source/binary consistency.";
+      // persistCode/IDL/So/Score etc. remain at parent values (set above).
     }
 
     // ── Kani formal verification (non-blocking, uses the build dir) ──────
@@ -418,23 +418,24 @@ async function hardenSolanaOnly(
       .catch(() => {});
   });
 
-  const testSuiteCode = await generateTestSuiteSafe(bestCode, parent.contractName, "SOLANA", bestIdl, emit);
+  const testSuiteCode = await generateTestSuiteSafe(persistCode, parent.contractName, "SOLANA", persistIdl, emit);
 
   const [updated] = await db
     .update(contractProjectsTable)
     .set({
       status: "success",
-      smartContractCode: bestCode,
-      compiledBytecode: bestSo,
-      abiOrIdl: bestIdl,
-      securityScore: bestScore,
-      securityNotes: bestNotes,
-      securityContextQuestion: bestContextQuestion,
-      compileLog: toolchainUnavailable
-        ? "Anchor/cargo toolchain unavailable; hardening proceeded without a real rebuild."
+      smartContractCode: persistCode,
+      compiledBytecode: persistSo,
+      abiOrIdl: persistIdl,
+      securityScore: persistScore,
+      securityNotes: persistNotes,
+      securityContextQuestion: persistContextQuestion,
+      compileLog: compileLogHeader
+        ? `${compileLogHeader}\n\n${compileLog.join("\n\n")}`.trim()
         : compileLog.join("\n\n"),
       testSuiteCode,
-      gasNotes: bestGasNotes || null,
+      gasNotes: persistGasNotes || null,
+      agentNotes: JSON.stringify(agentResult.agentNotes),
     })
     .where(eq(contractProjectsTable.id, child.id))
     .returning();

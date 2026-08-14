@@ -26,7 +26,7 @@ const CONFIG_DIR = path.join(os.homedir(), ".aura-forge");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
 const DEFAULTS: AuraConfig = {
-  apiUrl: "https://cross-chain-hub.replit.app",
+  apiUrl: "https://aura-forge.replit.app",
   defaultChain: "EVM",
 };
 
