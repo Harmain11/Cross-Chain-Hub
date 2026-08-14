@@ -1,185 +1,115 @@
 # Contributing to AURA Forge
 
-Thank you for your interest in contributing to **AURA Forge**! This document covers everything you need to get a local environment running, write good tests, and submit a pull request that gets merged quickly.
+Thanks for helping make AURA Forge better! This guide covers everything you need to go from zero to a merged PR.
 
----
+## Quick Links
 
-## Table of Contents
+- [Report a bug](https://github.com/Harmain11/Cross-Chain-Hub/issues/new?template=bug_report.md)
+- [Request a feature](https://github.com/Harmain11/Cross-Chain-Hub/issues/new?template=feature_request.md)
+- [Project structure](#project-structure)
+- [Running locally](#running-locally)
 
-- [Code of Conduct](#code-of-conduct)
-- [Local Setup](#local-setup)
-- [Project Structure](#project-structure)
-- [Development Workflow](#development-workflow)
-- [Testing](#testing)
-- [Submitting a Pull Request](#submitting-a-pull-request)
-- [Good First Issues](#good-first-issues)
+## What we'd love help with
 
----
+- 🔐 New vulnerability patterns for the 47-pattern audit engine
+- ⛓️ Additional chain support (zkSync, Berachain, Monad, etc.)
+- 🧪 Test coverage for the ReAct agent loop
+- 📖 Docs and examples
+- 🐛 Bug fixes (check open issues)
 
-## Code of Conduct
-
-Be respectful, constructive, and inclusive. We follow the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
-
----
-
-## Local Setup
-
-### Prerequisites
+## Prerequisites
 
 | Tool | Version |
 |---|---|
-| Node.js | 18+ |
-| pnpm | 8+ |
-| Python | 3.10+ |
-| Git | any recent |
+| Node.js | 20+ |
+| pnpm | 10+ |
+| PostgreSQL | 15+ |
+| Python | 3.10+ (for Slither audit) |
 
-### 1 — Clone and install
+## Running Locally
 
 ```bash
-git clone https://github.com/Harmain11/Cross-Chain-Hub.git
+# 1. Fork and clone
+git clone https://github.com/<your-username>/Cross-Chain-Hub.git
 cd Cross-Chain-Hub
 
-# Install all JS/TS workspace packages
+# 2. Install dependencies
 pnpm install
 
-# Install Python dependencies (if contributing to agentic layer)
-pip install -r requirements.txt
-```
-
-### 2 — Environment variables
-
-Copy the example env file and fill in your keys:
-
-```bash
+# 3. Set up environment
 cp .env.example .env
-```
+# Fill in: ANTHROPIC_API_KEY, DATABASE_URL, SESSION_SECRET
 
-| Variable | Purpose |
-|---|---|
-| `ANTHROPIC_API_KEY` | Required — powers the AI generation and audit pipeline |
-| `SESSION_SECRET` | Express session signing key |
-| `DATABASE_URL` | PostgreSQL connection string |
+# 4. Push database schema
+pnpm --filter @workspace/db db:push
 
-### 3 — Start the development servers
-
-```bash
-# Start all artifact services at once
+# 5. Start everything
 pnpm dev
-
-# Or start individually
-pnpm --filter @workspace/api-server run dev     # API on :3001
-pnpm --filter @workspace/aura-forge run dev     # Web app
-pnpm --filter @workspace/aura-forge-landing run dev  # Landing page
 ```
 
----
+Open `http://localhost:5173` for the dashboard.
 
 ## Project Structure
 
 ```
 Cross-Chain-Hub/
-├── packages/
-│   ├── cli/          # @aura-forge/cli — terminal REPL
-│   └── mcp/          # @aura-forge/mcp — MCP server (4 tools)
 ├── artifacts/
-│   ├── api-server/   # Express + Drizzle ORM backend
-│   ├── aura-forge/   # React web app (Vite + React Query)
-│   ├── aura-forge-landing/  # Marketing site
-│   └── aura-forge-pitch/    # Pitch deck slides
-├── CONTRIBUTING.md
-├── ISSUES_TO_CREATE.md
-└── README.md
+│   ├── api-server/           # Express REST API + agent logic
+│   │   └── src/lib/forge/
+│   │       ├── evmAgent.ts   # ReAct agent loop (main entry point)
+│   │       ├── pipeline.ts   # Chain router
+│   │       ├── llm.ts        # Claude tool-use helpers
+│   │       └── eipLookup.ts  # Live EIP spec fetcher
+│   ├── aura-forge/           # React dashboard (Monaco, live console)
+│   ├── aura-forge-landing/   # Marketing landing page
+│   └── aura-forge-pitch/     # Pitch deck (slides)
+├── packages/
+│   ├── cli/                  # @aura-forge/cli npm package
+│   └── mcp/                  # @aura-forge/mcp npm package
+├── lib/
+│   └── db/                   # Drizzle ORM schema + migrations
+└── .github/
+    ├── workflows/publish.yml # Auto-publish on v* tags
+    └── ISSUE_TEMPLATE/       # Bug / feature templates
 ```
-
----
 
 ## Development Workflow
 
-1. **Fork** the repository and clone your fork.
-2. Create a **feature branch** off `main`:
-   ```bash
-   git checkout -b feat/your-feature-name
-   ```
-3. Make your changes, following existing code style (TypeScript strict mode, ESLint, Prettier).
-4. **Commit** with a descriptive message using [Conventional Commits](https://www.conventionalcommits.org/):
-   ```
-   feat(cli): add --timeout flag to /deploy command
-   fix(audit): handle empty contract body without crashing
-   docs: update quickstart for Python 3.12
-   ```
-5. **Push** your branch and open a PR against `main`.
+1. **Branch** from `main`: `git checkout -b feat/my-feature`
+2. **Code** — follow the patterns already in the file you're editing
+3. **Test** — `pnpm test` (or test the specific package with `pnpm --filter <package> test`)
+4. **Lint** — `pnpm lint`
+5. **Commit** using [Conventional Commits](https://www.conventionalcommits.org/):
+   - `feat:` new feature
+   - `fix:` bug fix
+   - `docs:` documentation only
+   - `refactor:` code cleanup without behaviour change
+   - `test:` adding/fixing tests
+6. **PR** — fill in the template, link the related issue
 
----
+## Adding a Vulnerability Pattern
 
-## Testing
+The audit engine lives in `artifacts/api-server/src/lib/forge/evmAgent.ts`. Each tool call to `run_slither` returns structured findings. To add a new pattern:
 
-### CLI & MCP packages
+1. Add it to the Slither detector list (or implement a custom check in the `audit_security` tool handler)
+2. Add a test case in the corresponding `*.test.ts` file
+3. Update the pattern count in `README.md` and `artifacts/aura-forge-landing/`
 
-```bash
-# Run unit tests
-pnpm --filter @aura-forge/cli test
-pnpm --filter @aura-forge/mcp test
-
-# Run with coverage
-pnpm --filter @aura-forge/cli test -- --coverage
-```
-
-### API server
+## Releasing (maintainers)
 
 ```bash
-pnpm --filter @workspace/api-server test
+# Bump versions
+node version-bump.mjs
+
+# Commit, tag, and push — GitHub Actions publishes to npm automatically
+git add .
+git commit -m "chore: release v1.x.x"
+git tag v1.x.x
+git push origin main v1.x.x
 ```
 
-### Integration tests (requires a running API)
+The `publish.yml` workflow builds both packages and publishes to npm when a `v*` tag is pushed.
 
-```bash
-# Make sure the API server is running first
-pnpm --filter @workspace/api-server run dev
+## Code of Conduct
 
-# Then run integration suite
-pnpm --filter @aura-forge/cli test:integration
-```
-
-### What to test
-
-- All new CLI commands must have unit tests covering the happy path, network error, and invalid-input cases.
-- New Pydantic validation rules must include at least one passing and one failing fixture.
-- New chain integrations must include a mock RPC test confirming the fallback list is exercised.
-
----
-
-## Submitting a Pull Request
-
-### Checklist
-
-- [ ] Branch is based on the latest `main`
-- [ ] All existing tests pass (`pnpm test` in the root)
-- [ ] New functionality has tests
-- [ ] TypeScript compiles without errors (`pnpm typecheck`)
-- [ ] No new ESLint warnings (`pnpm lint`)
-- [ ] PR description explains **what** changed and **why**
-- [ ] If it changes user-facing CLI behaviour, the `CHANGELOG.md` in the affected package is updated
-
-### PR Title Format
-
-Follow Conventional Commits in the PR title — it is used to auto-generate changelogs:
-
-```
-feat(cli): add dynamic network routing module
-fix(audit): correct Pydantic score boundary condition
-chore(deps): bump solc to 0.8.27
-```
-
-### Review process
-
-- A maintainer will review within **3 business days**.
-- We may request changes — please address feedback within 7 days or the PR may be closed to keep the queue clean.
-- Once approved, a maintainer will squash-merge your PR.
-
----
-
-## Good First Issues
-
-New to the codebase? Check out issues labelled [`good first issue`](https://github.com/Harmain11/Cross-Chain-Hub/issues?q=label%3A%22good+first+issue%22) — they are scoped, well-documented, and have a suggested approach in the issue body.
-
-See [ISSUES_TO_CREATE.md](ISSUES_TO_CREATE.md) for a list of open community tasks.
+Be kind. We're all here to build cool things.
