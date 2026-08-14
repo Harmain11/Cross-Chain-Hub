@@ -368,7 +368,7 @@ export default function DashboardPage() {
       toast.error("Could not revoke key.")
     }
   }
-  const [codeViewMode, setCodeViewMode] = useState<"code" | "tests" | "history">("code")
+  const [codeViewMode, setCodeViewMode] = useState<"code" | "tests" | "abi" | "history">("code")
   const [historyDiffIndex, setHistoryDiffIndex] = useState<number | null>(null)
   const { data: lineage } = useGetProjectLineage(displayedProjectId as number, {
     query: { enabled: !!displayedProjectId && codeViewMode === "history" },
@@ -390,6 +390,8 @@ export default function DashboardPage() {
   const codeIsDirty = editedSmartContractCode !== null && editedSmartContractCode !== (activeProject?.smartContractCode ?? "")
   const testsAreDirty = editedTestSuiteCode !== null && editedTestSuiteCode !== (activeProject?.testSuiteCode ?? "")
   const editorIsDirty = codeViewMode === "code" ? codeIsDirty : codeViewMode === "tests" ? testsAreDirty : false
+  // Reset to code view when switching projects so ABI/tests tab doesn't persist a stale label
+  useEffect(() => { setCodeViewMode("code") }, [activeProjectId])
   const editingLocked = isForging || isDeploying || !displayedProjectId
 
   const handleSaveEditedCode = async () => {
@@ -1149,6 +1151,14 @@ export default function DashboardPage() {
                 >
                   Tests{testsAreDirty && <span className="ml-1 opacity-70">●</span>}
                 </button>
+                {activeProject?.abiOrIdl && (
+                  <button
+                    onClick={() => setCodeViewMode("abi")}
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border ${codeViewMode === "abi" ? "border-primary/50 text-primary bg-primary/10" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                  >
+                    ABI/IDL
+                  </button>
+                )}
                 <button
                   onClick={() => { setCodeViewMode("history"); setHistoryDiffIndex(null) }}
                   className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border ${codeViewMode === "history" ? "border-primary/50 text-primary bg-primary/10" : "border-transparent text-muted-foreground hover:text-foreground"}`}
@@ -1158,7 +1168,32 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-          {activeProject && codeViewMode === "history" ? (
+          {activeProject && codeViewMode === "abi" ? (
+            <Editor
+              key={`${displayedProjectId}-abi`}
+              height="100%"
+              language="json"
+              theme="vs-dark"
+              value={
+                activeProject.abiOrIdl
+                  ? (() => { try { return JSON.stringify(JSON.parse(activeProject.abiOrIdl), null, 2) } catch { return activeProject.abiOrIdl } })()
+                  : "// ABI/IDL not yet generated."
+              }
+              options={{
+                readOnly: true,
+                domReadOnly: true,
+                minimap: { enabled: false },
+                fontFamily: "'Space Mono', monospace",
+                fontSize: 13,
+                lineHeight: 22,
+                padding: { top: 40 },
+                scrollBeyondLastLine: false,
+                smoothScrolling: true,
+                cursorBlinking: "smooth",
+                scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+              }}
+            />
+          ) : activeProject && codeViewMode === "history" ? (
             <ScrollArea className="h-full pt-10">
               <div className="p-4 space-y-2">
                 {!lineage && (
