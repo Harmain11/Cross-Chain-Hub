@@ -773,6 +773,14 @@ export async function runEvmAgent(
     const toolResults: AnthropicToolResultBlock[] = [];
 
     for (const block of response.content) {
+      // Emit any between-tool reasoning text so the client can show the
+      // agent's thought process in real time.
+      if (block.type === "text") {
+        const text = block.text.trim();
+        if (text) emit({ phase: "reasoning", message: text });
+        continue;
+      }
+
       if (block.type !== "tool_use") continue;
 
       // Pass effectiveProject so audit_security and other tools use the
