@@ -17,6 +17,7 @@ import { runSlither } from "./slitherAnalysis";
 import { runAnchorChecks } from "./anchorChecks";
 import { runFoundryTests } from "./foundryRunner";
 import { runHalmosVerification, runKaniVerification } from "./formalVerification";
+import { runEvmAgent } from "./evmAgent";
 
 /**
  * Generates a matching test suite for the final contract version. Test-generation
@@ -190,195 +191,24 @@ export async function runForgePipeline(
   }
 }
 
+/**
+ * EVM pipeline now runs through the ReAct AI agent (evmAgent.ts) instead of
+ * the old scripted generate → compile → audit → harden loop.
+ *
+ * The agent decides at every step which tool to call (write_contract, compile,
+ * run_slither, fetch_eip, audit_security, patch_function, generate_tests,
+ * finish).  This enables:
+ *   - Planning phase before any code is written
+ *   - TDD: generate_tests before write_contract
+ *   - Surgical function-level patching instead of full rewrites
+ *   - Live EIP spec lookup for standards compliance
+ *   - Persistent agent memory (agentNotes column in DB)
+ */
 async function runEvmPipeline(
   project: ContractProjectRow,
   emit: (event: ForgeEvent) => void,
 ) {
-  await setStatus(project.id, "generating");
-  emit({ phase: "generating", message: "Generating Solidity contract..." });
-
-  const template = getTemplate("EVM", project.templateId);
-  const initialCode = await generateSolidityContract(
-    project.prompt,
-    project.contractName,
-    template?.promptFragment,
-    project.upgradeable ? UPGRADEABLE_EVM_FRAGMENT : undefined,
-  );
-  const compileLog: string[] = [];
-
-  const first = await compileWithSelfHeal(initialCode, project.contractName, emit, project.id);
-  compileLog.push(...first.log);
-
-  if (!first.result.success) {
-    await db
-      .update(contractProjectsTable)
-      .set({
-        status: "failed",
-        smartContractCode: first.code,
-        compileLog: compileLog.join("\n\n"),
-      })
-      .where(eq(contractProjectsTable.id, project.id));
-    emit({ phase: "error", message: "Compilation failed after self-healing attempts." });
-    return;
-  }
-
-  emit({ phase: "compiling", message: "Compilation succeeded." });
-
-  // Best-known-good candidate so far (always compiles successfully).
-  let bestCode = first.code;
-  let bestResult = first.result;
-
-  // ── Slither static analysis ───────────────────────────────────────────────
-  emit({ phase: "auditing", message: "Running Slither static analysis..." });
-  let slitherResult = await runSlither(bestCode, project.contractName);
-  if (slitherResult.available) {
-    const hi = slitherResult.findings.filter((f) => f.impact === "High").length;
-    const md = slitherResult.findings.filter((f) => f.impact === "Medium").length;
-    emit({
-      phase: "auditing",
-      message: slitherResult.findings.length > 0
-        ? `Slither: ${slitherResult.findings.length} finding(s) — ${hi} high, ${md} medium.`
-        : "Slither: no high/medium findings detected.",
-    });
-  } else {
-    emit({ phase: "auditing", message: "Slither not installed — LLM-only audit. (pip install slither-analyzer to enable)" });
-  }
-
-  // ── LLM security audit ───────────────────────────────────────────────────
-  emit({ phase: "auditing", message: "Running LLM security audit..." });
-  let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion, gasNotes: bestGasNotes } =
-    await scoreContractSecurity(bestCode, "EVM", project.upgradeable, bestResult.gasEstimates);
-  emit({
-    phase: "auditing",
-    message: `Security score: ${bestScore}/100. ${bestNotes}`,
-  });
-
-  let hardenAttempt = 0;
-  while (bestScore < TARGET_SECURITY_SCORE && hardenAttempt < MAX_SECURITY_HARDENING_ATTEMPTS) {
-    hardenAttempt += 1;
-    await setStatus(project.id, "hardening");
-    emit({
-      phase: "hardening",
-      message: `Security score ${bestScore}/100 is below the ${TARGET_SECURITY_SCORE} target — hardening contract (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS})...`,
-    });
-
-    // Merge Slither findings with LLM audit notes so the model addresses
-    // deterministic tool violations in the same rewrite pass.
-    const combinedNotes = combineNotes(bestNotes, slitherResult.formattedForLlm);
-    const hardenedCode = await hardenSolidityContract(
-      bestCode,
-      combinedNotes,
-      bestScore,
-      project.contractName,
-      project.userContext ?? undefined,
-    );
-
-    const recompiled = await compileWithSelfHeal(
-      hardenedCode,
-      project.contractName,
-      emit,
-      project.id,
-    );
-    compileLog.push(...recompiled.log);
-
-    if (!recompiled.result.success) {
-      emit({
-        phase: "hardening",
-        message: "Hardened contract failed to compile even after self-healing; keeping previous best version.",
-      });
-      continue;
-    }
-
-    // Re-run Slither on the hardened code to track resolution of findings.
-    slitherResult = await runSlither(recompiled.code, project.contractName);
-    if (slitherResult.available && slitherResult.findings.length > 0) {
-      emit({
-        phase: "auditing",
-        message: `Slither re-scan: ${slitherResult.findings.length} finding(s) still present after hardening.`,
-      });
-    }
-
-    emit({ phase: "auditing", message: "Re-auditing hardened contract..." });
-    const rescored = await scoreContractSecurity(
-      recompiled.code,
-      "EVM",
-      project.upgradeable,
-      recompiled.result.gasEstimates,
-    );
-    emit({
-      phase: "auditing",
-      message: `Security score: ${rescored.score}/100. ${rescored.notes}`,
-    });
-
-    if (rescored.score >= bestScore) {
-      bestCode = recompiled.code;
-      bestResult = recompiled.result;
-      bestScore = rescored.score;
-      bestNotes = rescored.notes;
-      bestContextQuestion = rescored.contextQuestion;
-      bestGasNotes = rescored.gasNotes;
-    } else {
-      emit({
-        phase: "hardening",
-        message: `Hardening attempt regressed the score (${rescored.score}/100 < ${bestScore}/100); keeping previous best version.`,
-      });
-    }
-  }
-
-  if (bestScore >= TARGET_SECURITY_SCORE) {
-    bestContextQuestion = null;
-    emit({
-      phase: "auditing",
-      message: `Reached target security score: ${bestScore}/100.`,
-    });
-  } else {
-    emit({
-      phase: "auditing",
-      message: `Stopped after ${MAX_SECURITY_HARDENING_ATTEMPTS} hardening attempts. Best achieved: ${bestScore}/100 (target ${TARGET_SECURITY_SCORE}).`,
-    });
-    if (bestContextQuestion) {
-      emit({
-        phase: "auditing",
-        message: `Providing more detail would improve this recommendation: ${bestContextQuestion}`,
-      });
-    }
-  }
-
-  const testSuiteCode = await generateTestSuiteSafe(bestCode, project.contractName, "EVM", undefined, emit);
-
-  // ── Foundry test execution (non-blocking) ────────────────────────────────
-  if (testSuiteCode) {
-    runFoundryTests(bestCode, testSuiteCode, project.contractName)
-      .then((fr) => emit({ phase: "testing", message: fr.formattedSummary }))
-      .catch(() => {});
-  }
-
-  // ── Halmos formal verification (non-blocking, fire-and-forget) ────────────
-  if (testSuiteCode) {
-    runHalmosVerification(bestCode, testSuiteCode, project.contractName)
-      .then((fv) => { if (fv.available) emit({ phase: "verification", message: fv.summary }); })
-      .catch(() => {});
-  }
-
-  const [updated] = await db
-    .update(contractProjectsTable)
-    .set({
-      status: "success",
-      smartContractCode: bestCode,
-      compiledBytecode: bestResult.bytecode,
-      abiOrIdl: JSON.stringify(bestResult.abi),
-      securityScore: bestScore,
-      securityNotes: bestNotes,
-      securityContextQuestion: bestContextQuestion,
-      compileLog: compileLog.join("\n\n"),
-      testSuiteCode,
-      gasEstimates: bestResult.gasEstimates ? JSON.stringify(bestResult.gasEstimates) : null,
-      gasNotes: bestGasNotes || null,
-    })
-    .where(eq(contractProjectsTable.id, project.id))
-    .returning();
-
-  emit({ phase: "done", project: updated! });
+  await runEvmAgent(project, emit);
 }
 
 /**

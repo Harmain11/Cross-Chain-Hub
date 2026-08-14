@@ -50,6 +50,12 @@ export const contractProjectsTable = pgTable("contract_projects", {
   // seed the next hardening pass with that extra context.
   userContext: text("user_context"),
   compileLog: text("compile_log"),
+  // AI Agent fields (populated when using the ReAct agent pipeline).
+  // agentPlan: JSON-serialised EvmPlan produced during the planning phase.
+  agentPlan: text("agent_plan"),
+  // agentNotes: JSON-serialised AgentNote[] — per-step scratchpad of what the
+  // agent tried and observed. Persisted so follow-up runs can load prior context.
+  agentNotes: text("agent_notes"),
   networkSelected: text("network_selected"),
   deploymentTxHash: text("deployment_tx_hash"),
   liveDeployedAddress: text("live_deployed_address"),

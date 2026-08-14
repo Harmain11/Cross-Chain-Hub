@@ -161,7 +161,12 @@ export async function generateTestSuite(
   contractName: string,
   ecosystem: "EVM" | "SOLANA",
   idl?: string,
+  /** Optional TDD requirements — comma-separated list of specific behaviours to test */
+  requirements?: string,
 ): Promise<string> {
+  const requirementsBlock = requirements
+    ? `\n\nTDD REQUIREMENTS — ensure every item below has at least one test:\n${requirements}`
+    : "";
   const system =
     ecosystem === "EVM"
       ? "You are a senior Solidity test engineer. Given a Solidity contract, write a complete Foundry-style test file (using forge-std's Test, `pragma solidity ^0.8.24;`) that exercises the contract's main functions, access-control rules, and edge cases. " +
@@ -170,8 +175,8 @@ export async function generateTestSuite(
         "Rules: respond with ONLY a single fenced ```typescript code block, no prose before or after.";
   const user =
     ecosystem === "EVM"
-      ? `Write Foundry tests for this Solidity contract named "${contractName}":\n\n${code}`
-      : `Write Anchor/TypeScript tests for this program named "${contractName}":\n\nPROGRAM:\n${code}\n\nIDL:\n${idl}`;
+      ? `Write Foundry tests for this Solidity contract named "${contractName}":\n\n${code}${requirementsBlock}`
+      : `Write Anchor/TypeScript tests for this program named "${contractName}":\n\nPROGRAM:\n${code}\n\nIDL:\n${idl}${requirementsBlock}`;
   const text = await ask(system, user);
   const match = text.match(/```(?:solidity|typescript|ts)?\n([\s\S]*?)```/);
   return (match ? match[1] : text).trim();
