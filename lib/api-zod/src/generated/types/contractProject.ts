@@ -102,5 +102,15 @@ export interface ContractProject {
   monitoringLastCheckedAt: Date | null;
   /** @nullable */
   monitoringLastAlertAt: Date | null;
+  /**
+     * JSON-serialized EvmPlan produced during the agent planning phase. Contains summary, applicable_standards, security_properties, attack_vectors, and test_requirements.
+     * @nullable
+     */
+  agentPlan: string | null;
+  /**
+     * JSON-serialized AgentNote[] — the per-step scratchpad the agent kept while executing (action, detail, outcome per step).
+     * @nullable
+     */
+  agentNotes: string | null;
   createdAt: Date;
 }

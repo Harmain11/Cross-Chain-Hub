@@ -368,6 +368,9 @@ export default function DashboardPage() {
       toast.error("Could not revoke key.")
     }
   }
+  const [agentPlanOpen, setAgentPlanOpen] = useState(false)
+  const [agentStepsOpen, setAgentStepsOpen] = useState(false)
+
   const [codeViewMode, setCodeViewMode] = useState<"code" | "tests" | "abi" | "history">("code")
   const [historyDiffIndex, setHistoryDiffIndex] = useState<number | null>(null)
   const { data: lineage } = useGetProjectLineage(displayedProjectId as number, {
@@ -391,7 +394,11 @@ export default function DashboardPage() {
   const testsAreDirty = editedTestSuiteCode !== null && editedTestSuiteCode !== (activeProject?.testSuiteCode ?? "")
   const editorIsDirty = codeViewMode === "code" ? codeIsDirty : codeViewMode === "tests" ? testsAreDirty : false
   // Reset to code view when switching projects so ABI/tests tab doesn't persist a stale label
-  useEffect(() => { setCodeViewMode("code") }, [activeProjectId])
+  useEffect(() => {
+    setCodeViewMode("code")
+    setAgentPlanOpen(false)
+    setAgentStepsOpen(false)
+  }, [activeProjectId])
   const editingLocked = isForging || isDeploying || !displayedProjectId
 
   const handleSaveEditedCode = async () => {
@@ -1385,6 +1392,116 @@ export default function DashboardPage() {
                   )}
                 </div>
               )}
+
+              {/* Agent Plan — collapsible, shown whenever agentPlan is present */}
+              {(() => {
+                if (!activeProject.agentPlan) return null
+                let plan: {
+                  summary?: string
+                  applicable_standards?: string[]
+                  security_properties?: string[]
+                  attack_vectors?: string[]
+                  test_requirements?: string[]
+                  approach?: string
+                } | null = null
+                try { plan = JSON.parse(activeProject.agentPlan) } catch { return null }
+                if (!plan) return null
+                return (
+                  <div className="mt-3 w-full bg-black/40 border border-white/5 rounded overflow-hidden">
+                    <button
+                      onClick={() => setAgentPlanOpen(o => !o)}
+                      className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors"
+                    >
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                        <Icons.Zap className="w-3 h-3 text-primary/70" />
+                        Agent Plan
+                      </span>
+                      <Icons.ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${agentPlanOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {agentPlanOpen && (
+                      <div className="px-3 pb-3 space-y-2 border-t border-white/5">
+                        {plan.summary && (
+                          <p className="text-[11px] text-muted-foreground font-mono leading-relaxed pt-2">{plan.summary}</p>
+                        )}
+                        {plan.applicable_standards && plan.applicable_standards.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-mono uppercase tracking-widest text-primary/60">Standards</p>
+                            <div className="flex flex-wrap gap-1">
+                              {plan.applicable_standards.map(s => (
+                                <span key={s} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary/80">{s}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {plan.security_properties && plan.security_properties.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-mono uppercase tracking-widest text-emerald-400/60">Security Properties</p>
+                            <ul className="space-y-0.5">
+                              {plan.security_properties.map((p, i) => (
+                                <li key={i} className="text-[10px] font-mono text-muted-foreground flex gap-1.5">
+                                  <span className="text-emerald-400/50 shrink-0">✓</span>{p}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {plan.attack_vectors && plan.attack_vectors.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-mono uppercase tracking-widest text-amber-400/60">Attack Vectors Defended</p>
+                            <ul className="space-y-0.5">
+                              {plan.attack_vectors.map((v, i) => (
+                                <li key={i} className="text-[10px] font-mono text-muted-foreground flex gap-1.5">
+                                  <span className="text-amber-400/50 shrink-0">⚔</span>{v}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* Agent Steps — collapsible, shown after run completes */}
+              {(() => {
+                if (!activeProject.agentNotes || isForging) return null
+                let notes: Array<{ step: number; action: string; detail: string; outcome: string }> | null = null
+                try { notes = JSON.parse(activeProject.agentNotes) } catch { return null }
+                if (!notes || notes.length === 0) return null
+                return (
+                  <div className="mt-3 w-full bg-black/40 border border-white/5 rounded overflow-hidden">
+                    <button
+                      onClick={() => setAgentStepsOpen(o => !o)}
+                      className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors"
+                    >
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                        <Icons.Terminal className="w-3 h-3 text-primary/70" />
+                        Agent Steps ({notes.length})
+                      </span>
+                      <Icons.ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${agentStepsOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {agentStepsOpen && (
+                      <div className="border-t border-white/5 max-h-64 overflow-y-auto">
+                        {notes.map((note, i) => (
+                          <div key={i} className={`px-3 py-2 ${i < notes!.length - 1 ? "border-b border-white/5" : ""}`}>
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className="text-[9px] font-mono text-primary/50 shrink-0">#{note.step}</span>
+                              <span className="text-[10px] font-mono text-primary/80 font-semibold uppercase tracking-wide">{note.action.replace(/_/g, " ")}</span>
+                            </div>
+                            {note.detail && (
+                              <p className="text-[10px] font-mono text-muted-foreground leading-relaxed truncate" title={note.detail}>{note.detail}</p>
+                            )}
+                            {note.outcome && (
+                              <p className="text-[9px] font-mono text-muted-foreground/60 mt-0.5 leading-relaxed">→ {note.outcome}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               {activeProject.securityContextQuestion && (
                 <div className="mt-3 w-full bg-amber-500/10 border border-amber-500/20 rounded p-3 space-y-2">

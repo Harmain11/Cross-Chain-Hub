@@ -152,6 +152,8 @@ export const GetProjectResponse = zod.object({
   "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
   "monitoringLastCheckedAt": zod.coerce.date().nullable(),
   "monitoringLastAlertAt": zod.coerce.date().nullable(),
+  "agentPlan": zod.string().nullable().describe('JSON-serialized EvmPlan produced during the agent planning phase. Contains summary, applicable_standards, security_properties, attack_vectors, and test_requirements.'),
+  "agentNotes": zod.string().nullable().describe('JSON-serialized AgentNote[] — the per-step scratchpad the agent kept while executing (action, detail, outcome per step).'),
   "createdAt": zod.coerce.date()
 })
 
@@ -234,6 +236,8 @@ export const RecordDeploymentResponse = zod.object({
   "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
   "monitoringLastCheckedAt": zod.coerce.date().nullable(),
   "monitoringLastAlertAt": zod.coerce.date().nullable(),
+  "agentPlan": zod.string().nullable().describe('JSON-serialized EvmPlan produced during the agent planning phase. Contains summary, applicable_standards, security_properties, attack_vectors, and test_requirements.'),
+  "agentNotes": zod.string().nullable().describe('JSON-serialized AgentNote[] — the per-step scratchpad the agent kept while executing (action, detail, outcome per step).'),
   "createdAt": zod.coerce.date()
 })
 
@@ -288,6 +292,8 @@ export const UpdateProjectCodeResponse = zod.object({
   "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
   "monitoringLastCheckedAt": zod.coerce.date().nullable(),
   "monitoringLastAlertAt": zod.coerce.date().nullable(),
+  "agentPlan": zod.string().nullable().describe('JSON-serialized EvmPlan produced during the agent planning phase. Contains summary, applicable_standards, security_properties, attack_vectors, and test_requirements.'),
+  "agentNotes": zod.string().nullable().describe('JSON-serialized AgentNote[] — the per-step scratchpad the agent kept while executing (action, detail, outcome per step).'),
   "createdAt": zod.coerce.date()
 })
 
@@ -338,6 +344,8 @@ export const UpdateMonitoringConfigResponse = zod.object({
   "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
   "monitoringLastCheckedAt": zod.coerce.date().nullable(),
   "monitoringLastAlertAt": zod.coerce.date().nullable(),
+  "agentPlan": zod.string().nullable().describe('JSON-serialized EvmPlan produced during the agent planning phase. Contains summary, applicable_standards, security_properties, attack_vectors, and test_requirements.'),
+  "agentNotes": zod.string().nullable().describe('JSON-serialized AgentNote[] — the per-step scratchpad the agent kept while executing (action, detail, outcome per step).'),
   "createdAt": zod.coerce.date()
 })
 
@@ -554,6 +562,8 @@ export const CreateForgeJobResponse = zod.object({
   "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
   "monitoringLastCheckedAt": zod.coerce.date().nullable(),
   "monitoringLastAlertAt": zod.coerce.date().nullable(),
+  "agentPlan": zod.string().nullable().describe('JSON-serialized EvmPlan produced during the agent planning phase. Contains summary, applicable_standards, security_properties, attack_vectors, and test_requirements.'),
+  "agentNotes": zod.string().nullable().describe('JSON-serialized AgentNote[] — the per-step scratchpad the agent kept while executing (action, detail, outcome per step).'),
   "createdAt": zod.coerce.date()
 })
 
@@ -602,6 +612,8 @@ export const CreateHardenJobResponse = zod.object({
   "monitoringEmailAlertsEnabled": zod.boolean().describe('Whether the user has opted into email alerts in addition to (or instead of) the webhook.'),
   "monitoringLastCheckedAt": zod.coerce.date().nullable(),
   "monitoringLastAlertAt": zod.coerce.date().nullable(),
+  "agentPlan": zod.string().nullable().describe('JSON-serialized EvmPlan produced during the agent planning phase. Contains summary, applicable_standards, security_properties, attack_vectors, and test_requirements.'),
+  "agentNotes": zod.string().nullable().describe('JSON-serialized AgentNote[] — the per-step scratchpad the agent kept while executing (action, detail, outcome per step).'),
   "createdAt": zod.coerce.date()
 })
 
