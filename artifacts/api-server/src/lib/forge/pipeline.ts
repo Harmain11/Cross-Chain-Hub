@@ -13,6 +13,10 @@ import {
   generateTestSuite,
 } from "./llm";
 import { getTemplate, UPGRADEABLE_EVM_FRAGMENT } from "./templates";
+import { runSlither } from "./slitherAnalysis";
+import { runAnchorChecks } from "./anchorChecks";
+import { runFoundryTests } from "./foundryRunner";
+import { runHalmosVerification, runKaniVerification } from "./formalVerification";
 
 /**
  * Generates a matching test suite for the final contract version. Test-generation
@@ -38,6 +42,14 @@ async function generateTestSuiteSafe(
     });
     return null;
   }
+}
+
+/**
+ * Merges LLM audit notes with deterministic tool findings (Slither, clippy).
+ * The combined string is fed to the hardening LLM so it addresses both in one pass.
+ */
+function combineNotes(llmNotes: string, toolFindings: string): string {
+  return toolFindings ? `${llmNotes}\n\n${toolFindings}` : llmNotes;
 }
 
 export type ForgeEvent =
@@ -216,6 +228,23 @@ async function runEvmPipeline(
   let bestCode = first.code;
   let bestResult = first.result;
 
+  // ── Slither static analysis ───────────────────────────────────────────────
+  emit({ phase: "auditing", message: "Running Slither static analysis..." });
+  let slitherResult = await runSlither(bestCode, project.contractName);
+  if (slitherResult.available) {
+    const hi = slitherResult.findings.filter((f) => f.impact === "High").length;
+    const md = slitherResult.findings.filter((f) => f.impact === "Medium").length;
+    emit({
+      phase: "auditing",
+      message: slitherResult.findings.length > 0
+        ? `Slither: ${slitherResult.findings.length} finding(s) — ${hi} high, ${md} medium.`
+        : "Slither: no high/medium findings detected.",
+    });
+  } else {
+    emit({ phase: "auditing", message: "Slither not installed — LLM-only audit. (pip install slither-analyzer to enable)" });
+  }
+
+  // ── LLM security audit ───────────────────────────────────────────────────
   emit({ phase: "auditing", message: "Running LLM security audit..." });
   let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion, gasNotes: bestGasNotes } =
     await scoreContractSecurity(bestCode, "EVM", project.upgradeable, bestResult.gasEstimates);
@@ -233,9 +262,12 @@ async function runEvmPipeline(
       message: `Security score ${bestScore}/100 is below the ${TARGET_SECURITY_SCORE} target — hardening contract (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS})...`,
     });
 
+    // Merge Slither findings with LLM audit notes so the model addresses
+    // deterministic tool violations in the same rewrite pass.
+    const combinedNotes = combineNotes(bestNotes, slitherResult.formattedForLlm);
     const hardenedCode = await hardenSolidityContract(
       bestCode,
-      bestNotes,
+      combinedNotes,
       bestScore,
       project.contractName,
       project.userContext ?? undefined,
@@ -255,6 +287,15 @@ async function runEvmPipeline(
         message: "Hardened contract failed to compile even after self-healing; keeping previous best version.",
       });
       continue;
+    }
+
+    // Re-run Slither on the hardened code to track resolution of findings.
+    slitherResult = await runSlither(recompiled.code, project.contractName);
+    if (slitherResult.available && slitherResult.findings.length > 0) {
+      emit({
+        phase: "auditing",
+        message: `Slither re-scan: ${slitherResult.findings.length} finding(s) still present after hardening.`,
+      });
     }
 
     emit({ phase: "auditing", message: "Re-auditing hardened contract..." });
@@ -304,6 +345,20 @@ async function runEvmPipeline(
   }
 
   const testSuiteCode = await generateTestSuiteSafe(bestCode, project.contractName, "EVM", undefined, emit);
+
+  // ── Foundry test execution (non-blocking) ────────────────────────────────
+  if (testSuiteCode) {
+    runFoundryTests(bestCode, testSuiteCode, project.contractName)
+      .then((fr) => emit({ phase: "testing", message: fr.formattedSummary }))
+      .catch(() => {});
+  }
+
+  // ── Halmos formal verification (non-blocking, fire-and-forget) ────────────
+  if (testSuiteCode) {
+    runHalmosVerification(bestCode, testSuiteCode, project.contractName)
+      .then((fv) => { if (fv.available) emit({ phase: "verification", message: fv.summary }); })
+      .catch(() => {});
+  }
 
   const [updated] = await db
     .update(contractProjectsTable)
@@ -390,6 +445,22 @@ async function hardenEvmOnly(
   let bestContextQuestion: string | null = null;
   let bestGasNotes = parent.gasNotes ?? "";
 
+  // ── Slither static analysis on seed code ────────────────────────────────
+  emit({ phase: "auditing", message: "Running Slither static analysis..." });
+  let slitherResult = await runSlither(bestCode, parent.contractName);
+  if (slitherResult.available) {
+    const hi = slitherResult.findings.filter((f) => f.impact === "High").length;
+    const md = slitherResult.findings.filter((f) => f.impact === "Medium").length;
+    emit({
+      phase: "auditing",
+      message: slitherResult.findings.length > 0
+        ? `Slither: ${slitherResult.findings.length} finding(s) — ${hi} high, ${md} medium.`
+        : "Slither: no high/medium findings detected.",
+    });
+  } else {
+    emit({ phase: "auditing", message: "Slither not installed — LLM-only audit. (pip install slither-analyzer to enable)" });
+  }
+
   if (parent.securityScore === null) {
     emit({ phase: "auditing", message: "Running LLM security audit..." });
     const scored = await scoreContractSecurity(bestCode, "EVM", parent.upgradeable, bestResult.gasEstimates);
@@ -411,9 +482,10 @@ async function hardenEvmOnly(
       message: `Hardening contract (attempt ${hardenAttempt}/${MAX_SECURITY_HARDENING_ATTEMPTS}), current score ${bestScore}/100...`,
     });
 
+    const combinedNotes = combineNotes(bestNotes, slitherResult.formattedForLlm);
     const hardenedCode = await hardenSolidityContract(
       bestCode,
-      bestNotes,
+      combinedNotes,
       bestScore,
       parent.contractName,
       child.userContext ?? undefined,
@@ -427,6 +499,15 @@ async function hardenEvmOnly(
         message: "Hardened contract failed to compile even after self-healing; keeping previous best version.",
       });
       continue;
+    }
+
+    // Re-run Slither to track which findings were resolved.
+    slitherResult = await runSlither(recompiled.code, parent.contractName);
+    if (slitherResult.available && slitherResult.findings.length > 0) {
+      emit({
+        phase: "auditing",
+        message: `Slither re-scan: ${slitherResult.findings.length} finding(s) still present after hardening.`,
+      });
     }
 
     emit({ phase: "auditing", message: "Re-auditing hardened contract..." });
@@ -473,6 +554,20 @@ async function hardenEvmOnly(
   }
 
   const testSuiteCode = await generateTestSuiteSafe(bestCode, parent.contractName, "EVM", undefined, emit);
+
+  // ── Foundry test execution (non-blocking) ──────────────────────────────
+  if (testSuiteCode) {
+    runFoundryTests(bestCode, testSuiteCode, parent.contractName)
+      .then((fr) => emit({ phase: "testing", message: fr.formattedSummary }))
+      .catch(() => {});
+  }
+
+  // ── Halmos formal verification (non-blocking, fire-and-forget) ──────────
+  if (testSuiteCode) {
+    runHalmosVerification(bestCode, testSuiteCode, parent.contractName)
+      .then((fv) => { if (fv.available) emit({ phase: "verification", message: fv.summary }); })
+      .catch(() => {});
+  }
 
   const [updated] = await db
     .update(contractProjectsTable)
@@ -533,6 +628,24 @@ async function hardenSolanaOnly(
 
   const compileLog: string[] = [];
 
+  // ── cargo clippy (Anchor built-in checks) — run in a temp build dir ──────
+  let anchorFindings = "";
+  await withTempBuildDir(async (clippyDir) => {
+    emit({ phase: "auditing", message: "Running cargo clippy (Anchor built-in checks)..." });
+    const clippy = await runAnchorChecks(clippyDir);
+    if (clippy.available) {
+      anchorFindings = clippy.formattedForLlm;
+      emit({
+        phase: "auditing",
+        message: clippy.clippyPassed
+          ? "cargo clippy: no warnings."
+          : "cargo clippy: warnings detected — feeding into self-correction loop.",
+      });
+    } else {
+      emit({ phase: "auditing", message: "cargo clippy unavailable — skipping Anchor built-in checks." });
+    }
+  }).catch(() => {});
+
   // ── LLM-only hardening loop ──────────────────────────────────────────────
   let hardenAttempt = 0;
   while (
@@ -546,10 +659,12 @@ async function hardenSolanaOnly(
       message: `Hardening program (attempt ${hardenAttempt}/${MAX_SOLANA_HARDENING_ATTEMPTS}, LLM only), current score ${bestScore}/100...`,
     });
 
+    // Merge clippy findings with LLM audit notes for combined self-correction.
+    const combinedNotes = combineNotes(bestNotes, anchorFindings);
     let hardened: { code: string; idl: string };
     try {
       hardened = await hardenAnchorContract(
-        bestCode, bestIdl, bestNotes, bestScore, parent.contractName,
+        bestCode, bestIdl, combinedNotes, bestScore, parent.contractName,
         child.userContext ?? undefined,
       );
     } catch (err) {
@@ -614,6 +729,11 @@ async function hardenSolanaOnly(
     } else {
       emit({ phase: "compiling", message: "Final compile failed; keeping parent's compiled binary and best LLM IDL." });
     }
+
+    // ── Kani formal verification (non-blocking, uses the build dir) ──────
+    runKaniVerification(buildDir)
+      .then((fv) => { if (fv.available) emit({ phase: "verification", message: fv.summary }); })
+      .catch(() => {});
   });
 
   const testSuiteCode = await generateTestSuiteSafe(bestCode, parent.contractName, "SOLANA", bestIdl, emit);
@@ -700,13 +820,31 @@ async function runSolanaPipeline(
       emit({ phase: "compiling", message: `Validation compile succeeded (${initial.result.soSizeBytes} bytes). Skipping IDL build until final pass.` });
     }
 
-    // ── Step 2: initial security audit ──────────────────────────────────────
+    // ── Step 2: Anchor built-in checks (cargo clippy) ───────────────────────
+    let anchorFindings = "";
+    if (!toolchainUnavailable) {
+      emit({ phase: "auditing", message: "Running cargo clippy (Anchor built-in checks)..." });
+      const clippy = await runAnchorChecks(buildDir);
+      if (clippy.available) {
+        anchorFindings = clippy.formattedForLlm;
+        emit({
+          phase: "auditing",
+          message: clippy.clippyPassed
+            ? "cargo clippy: no warnings."
+            : "cargo clippy: warnings detected — feeding into self-correction loop.",
+        });
+      } else {
+        emit({ phase: "auditing", message: "cargo clippy unavailable — skipping Anchor built-in checks." });
+      }
+    }
+
+    // ── Step 3: initial security audit ──────────────────────────────────────
     emit({ phase: "auditing", message: "Running LLM security audit..." });
     let { score: bestScore, notes: bestNotes, contextQuestion: bestContextQuestion, gasNotes: bestGasNotes } =
       await scoreContractSecurity(bestCode, "SOLANA");
     emit({ phase: "auditing", message: `Security score: ${bestScore}/100. ${bestNotes}` });
 
-    // ── Step 3: LLM-only hardening loop (no cargo recompile per iteration) ──
+    // ── Step 4: LLM-only hardening loop (no cargo recompile per iteration) ──
     let hardenAttempt = 0;
     while (bestScore < TARGET_SOLANA_SECURITY_SCORE && hardenAttempt < MAX_SOLANA_HARDENING_ATTEMPTS) {
       hardenAttempt += 1;
@@ -716,10 +854,12 @@ async function runSolanaPipeline(
         message: `Score ${bestScore}/100 below target ${TARGET_SOLANA_SECURITY_SCORE} — hardening (attempt ${hardenAttempt}/${MAX_SOLANA_HARDENING_ATTEMPTS}, LLM only)...`,
       });
 
+      // Combine LLM audit notes with deterministic clippy findings.
+      const combinedNotes = combineNotes(bestNotes, anchorFindings);
       let hardened: { code: string; idl: string };
       try {
         hardened = await hardenAnchorContract(
-          bestCode, bestIdl, bestNotes, bestScore, project.contractName,
+          bestCode, bestIdl, combinedNotes, bestScore, project.contractName,
           project.userContext ?? undefined,
         );
       } catch (err) {
@@ -803,6 +943,13 @@ async function runSolanaPipeline(
 
     // ── Step 5: test generation ──────────────────────────────────────────────
     const testSuiteCode = await generateTestSuiteSafe(bestCode, project.contractName, "SOLANA", bestIdl, emit);
+
+    // ── Kani formal verification (non-blocking, uses the build dir) ──────
+    if (!toolchainUnavailable) {
+      runKaniVerification(buildDir)
+        .then((fv) => { if (fv.available) emit({ phase: "verification", message: fv.summary }); })
+        .catch(() => {});
+    }
 
     const rentNote = bestRent != null
       ? `Real rent-exemption minimum for the compiled program account: ${bestRent.toLocaleString()} lamports (computed by \`solana rent\` from the actual .so size).`
