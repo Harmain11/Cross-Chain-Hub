@@ -85,6 +85,12 @@ export interface HardenContext {
    * system prompt apply the correct upgradeability requirements.
    */
   upgradeable: boolean;
+  /**
+   * The parent project's existing Foundry test suite, if any.
+   * Used as a fallback when the harden-pass agent finishes without generating
+   * new tests so the child row is never left with a null testSuiteCode.
+   */
+  parentTestSuiteCode?: string | null;
 }
 
 interface AgentState {
@@ -847,8 +853,22 @@ export async function runEvmAgent(
       state.tests = await generateTestSuite(state.code, effectiveProject.contractName, "EVM");
       emit({ phase: "testing", message: "Test suite generated." });
     } catch {
-      emit({ phase: "testing", message: "Test suite generation skipped." });
+      // LLM test generation failed — fall back to the parent's test suite when
+      // this is a harden-only re-run so the child row is never left with null.
+      if (hardenContext?.parentTestSuiteCode) {
+        state.tests = hardenContext.parentTestSuiteCode;
+        emit({ phase: "testing", message: "Using parent project's test suite as fallback." });
+      } else {
+        emit({ phase: "testing", message: "Test suite generation skipped." });
+      }
     }
+  }
+
+  // If the agent finished without generating tests (no exception, just never
+  // called generate_tests), also fall back to the parent's test suite.
+  if (!state.tests && hardenContext?.parentTestSuiteCode) {
+    state.tests = hardenContext.parentTestSuiteCode;
+    emit({ phase: "testing", message: "No new tests generated — carrying forward parent project's test suite." });
   }
 
   // ── 8. Foundry + Halmos (non-blocking, fire-and-forget) ───────────────────

@@ -268,6 +268,7 @@ async function hardenEvmOnly(
     securityNotes: parent.securityNotes ?? "",
     agentNotes: parentAgentNotes,
     upgradeable: parent.upgradeable ?? false,
+    parentTestSuiteCode: parent.testSuiteCode ?? null,
   });
 }
 
