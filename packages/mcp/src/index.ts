@@ -12,7 +12,7 @@
  *       "args": ["@aura-forge/mcp"],
  *       "env": {
  *         "AURA_FORGE_API_KEY": "af_...",
- *         "AURA_FORGE_API_URL": "https://aura-forge.replit.app"
+ *         "AURA_FORGE_API_URL": "https://cross-chain-hub.replit.app"
  *       }
  *     }
  *   }
@@ -36,7 +36,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 
   Environment variables:
     AURA_FORGE_API_KEY   Your AURA Forge API key (required for tool calls)
-    AURA_FORGE_API_URL   API server URL (default: https://aura-forge.replit.app)
+    AURA_FORGE_API_URL   API server URL (default: https://cross-chain-hub.replit.app)
 
   Typical claude_desktop_config.json entry:
     {
@@ -53,7 +53,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const API_URL  = process.env.AURA_FORGE_API_URL ?? "https://aura-forge.replit.app";
+const API_URL  = process.env.AURA_FORGE_API_URL ?? "https://cross-chain-hub.replit.app";
 const API_KEY  = process.env.AURA_FORGE_API_KEY ?? "";
 
 function authHeaders(): Record<string, string> {
