@@ -219,7 +219,12 @@ export async function runHardenOnlyPipeline(
   emit: (event: ForgeEvent) => void,
 ): Promise<void> {
   try {
-    if (!parent.smartContractCode) {
+    if (parent.status !== "success") {
+      throw new Error(
+        `Source project has not completed successfully (status: "${parent.status}") — cannot re-run hardening`,
+      );
+    }
+    if (!parent.smartContractCode || parent.smartContractCode.trim() === "") {
       throw new Error("Source project has no compiled code to harden");
     }
     if (parent.ecosystem === "EVM") {
