@@ -466,7 +466,7 @@ export default function DashboardPage() {
       queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() })
 
       // Start SSE Stream
-      const eventSource = new EventSource(`${import.meta.env.BASE_URL}api/forge-contract/${newJob.id}/stream`, { withCredentials: true })
+      const eventSource = new EventSource(`/api/forge-contract/${newJob.id}/stream`, { withCredentials: true })
       
       eventSource.onmessage = (event) => {
         try {
@@ -525,7 +525,7 @@ export default function DashboardPage() {
       setDisplayedProjectId(child.id)
       queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() })
 
-      const eventSource = new EventSource(`${import.meta.env.BASE_URL}api/projects/${child.id}/harden-stream`, { withCredentials: true })
+      const eventSource = new EventSource(`/api/projects/${child.id}/harden-stream`, { withCredentials: true })
 
       eventSource.onmessage = (event) => {
         try {
@@ -569,7 +569,7 @@ export default function DashboardPage() {
 
     setIsDownloading(true)
     try {
-      const res = await fetch(`${import.meta.env.BASE_URL}api/projects/${displayedProjectId}/export`, {
+      const res = await fetch(`/api/projects/${displayedProjectId}/export`, {
         credentials: "include",
       })
       if (!res.ok) {
