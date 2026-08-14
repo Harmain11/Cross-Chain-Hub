@@ -1320,11 +1320,12 @@ export default function DashboardPage() {
               <div key={i} className="mb-1.5 leading-relaxed flex gap-3">
                 <span className="text-primary/50 shrink-0 select-none">[{new Date().toISOString().substring(11, 19)}]</span>
                 <span className={
+                  `min-w-0 break-words ${
                   log.phase === 'error' ? 'text-destructive' : 
                   log.phase === 'done' || log.phase === 'success' ? 'text-green-400' :
                   log.phase === 'healing' || log.phase === 'hardening' ? 'text-amber-400' :
                   log.phase === 'reasoning' ? 'text-muted-foreground italic' :
-                  'text-[#ccc]'
+                  'text-[#ccc]'}`
                 }>{log.message}</span>
               </div>
             ))}
